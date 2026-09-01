@@ -1,0 +1,67 @@
+{
+  "id": "fmsg",
+  "name": "fmsg",
+  "description": "Federated, threaded messaging through the fmsg Web API.",
+  "activation": {
+    "onStartup": true
+  },
+  "channels": ["fmsg"],
+  "contracts": {
+    "tools": ["fmsg_send"]
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  },
+  "channelConfigs": {
+    "fmsg": {
+      "label": "fmsg",
+      "description": "fmsg Web API connection, access control, and loop protection.",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": { "type": "boolean", "default": true },
+          "apiUrl": {
+            "type": "string",
+            "format": "uri",
+            "default": "https://api.fmsg.io"
+          },
+          "apiKey": {
+            "type": "string",
+            "pattern": "^fmsgk_",
+            "description": "fmsg API key. FMSG_API_KEY takes precedence."
+          },
+          "homeChannel": {
+            "type": "string",
+            "pattern": "^@[^@\\s]+@[^@\\s]+$"
+          },
+          "allowedUsers": {
+            "type": "array",
+            "items": { "type": "string", "pattern": "^@[^@\\s]+@[^@\\s]+$" },
+            "default": []
+          },
+          "allowAllUsers": { "type": "boolean", "default": false },
+          "maxAgentTurnsPerThread": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 8,
+            "description": "Automatic OpenClaw turns allowed per fmsg branch/window; 0 disables the circuit breaker."
+          },
+          "agentTurnWindowMs": {
+            "type": "integer",
+            "minimum": 1,
+            "default": 60000,
+            "description": "Sliding per-branch automatic-turn window in milliseconds."
+          },
+          "mediaMaxBytes": {
+            "type": "integer",
+            "minimum": 1,
+            "default": 10485760
+          }
+        }
+      }
+    }
+  }
+}

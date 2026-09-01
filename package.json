@@ -1,0 +1,107 @@
+{
+  "name": "@markmnl/openclaw-fmsg",
+  "version": "0.1.0",
+  "description": "OpenClaw channel plugin for the federated messaging protocol fmsg",
+  "type": "module",
+  "license": "MIT",
+  "author": "Mark Mennell",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fmsg/openclaw-fmsg.git"
+  },
+  "homepage": "https://github.com/fmsg/openclaw-fmsg#readme",
+  "bugs": "https://github.com/fmsg/openclaw-fmsg/issues",
+  "keywords": [
+    "openclaw",
+    "fmsg",
+    "channel",
+    "federated-messaging"
+  ],
+  "engines": {
+    "node": ">=22.22.3 <23 || >=24.15.0 <25 || >=25.9.0"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
+    "index.ts",
+    "src/**/*.ts",
+    "openclaw.plugin.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
+    "test": "vitest run",
+    "test:e2e": "FMSG_E2E=1 vitest run test/fmsg-docker.e2e.test.ts",
+    "test:gateway": "OPENCLAW_GATEWAY_E2E=1 vitest run test/live-openclaw-gateway.e2e.test.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "prepack": "npm run clean && npm run build && npm test"
+  },
+  "dependencies": {
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.0",
+    "@types/ws": "^8.18.1",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  },
+  "peerDependencies": {
+    "openclaw": ">=2026.8.1"
+  },
+  "peerDependenciesMeta": {
+    "openclaw": {
+      "optional": true
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ],
+    "runtimeExtensions": [
+      "./dist/index.js"
+    ],
+    "channels": [
+      "fmsg"
+    ],
+    "installDependencies": true,
+    "compat": {
+      "pluginApi": ">=2026.8.1",
+      "minGatewayVersion": "2026.8.1"
+    },
+    "build": {
+      "openclawVersion": "2026.8.1",
+      "pluginSdkVersion": "2026.8.1"
+    },
+    "channel": {
+      "id": "fmsg",
+      "label": "fmsg",
+      "selectionLabel": "fmsg (Federated Messaging)",
+      "docsPath": "https://github.com/fmsg/openclaw-fmsg#readme",
+      "docsLabel": "documentation",
+      "blurb": "Federated, threaded messaging over fmsg Web API.",
+      "order": 75,
+      "aliases": [
+        "fmsg"
+      ]
+    },
+    "install": {
+      "minHostVersion": ">=2026.8.1",
+      "npmSpec": "@markmnl/openclaw-fmsg",
+      "localPath": ".",
+      "defaultChoice": "npm"
+    }
+  }
+}
