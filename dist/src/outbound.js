@@ -28,9 +28,20 @@ async function resolveParent(service, params, counterparty) {
     const parentId = explicit ?? (threadId ? service.state.getLastOutbound(threadId) ?? service.state.getLastInbound(threadId) : undefined);
     if (parentId) {
         const stored = service.state.getMessage(parentId);
-        const parent = await service.client.getMessage(parentId, params.signal).catch(() => undefined);
+        let parent;
+        try {
+            parent = await service.client.getMessage(parentId, params.signal);
+        }
+        catch (error) {
+            if (params.signal?.aborted)
+                throw error;
+            service.log?.warn?.(`fmsg parent message ${parentId} fetch failed; ` +
+                `${stored ? "using stored participant metadata" : "reply-all participant metadata is unavailable"}: ` +
+                formatSafeError(error));
+        }
         return {
             ...(parent ? { parent } : {}),
+            ...(stored ? { stored } : {}),
             pid: parentId,
             ...(threadId || stored?.branchId ? { branchId: threadId ?? stored?.branchId } : {}),
             ...(stored?.rootId ? { rootId: stored.rootId } : {}),
@@ -53,8 +64,9 @@ export async function sendFmsgOutbound(params) {
     const service = await resolveFmsgService({ cfg: params.cfg, accountId: params.accountId });
     const token = await service.client.getToken();
     const parent = await resolveParent(service, params, counterparty);
-    const recipients = parent.parent
-        ? replyAllRecipients(parent.parent, token.sender)
+    const participantSource = parent.parent ?? parent.stored;
+    const recipients = participantSource
+        ? replyAllRecipients(participantSource, token.sender)
         : [counterparty];
     if (recipients.length === 0)
         recipients.push(counterparty);

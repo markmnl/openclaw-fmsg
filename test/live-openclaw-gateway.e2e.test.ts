@@ -258,6 +258,9 @@ describe.skipIf(!enabled)("live OpenClaw gateway", () => {
         () => draftRequests(fmsg).find((request) => (request.body as { pid?: number } | undefined)?.pid === 100),
         "the root reply",
       );
+      expect(JSON.stringify(model.requests[0])).toContain("participants other than this OpenClaw address");
+      expect(JSON.stringify(model.requests[0])).toContain("@bob@example.org");
+      expect(JSON.stringify(model.requests[0])).toContain("@carol@example.org");
       expect((rootReply.body as FmsgMessage).to).toEqual([
         "@alice@example.net",
         "@bob@example.org",
