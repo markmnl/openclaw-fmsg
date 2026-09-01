@@ -130,6 +130,9 @@ export const fmsgSetupWizard: ChannelSetupWizard = {
       if (!hasConfiguredFmsgHomeChannel(cfg)) {
         lines.push("Home fmsg address has not been configured.");
       }
+      if (process.env.FMSG_API_KEY?.trim() && typeof rawFmsgConfig(cfg).apiKey === "object") {
+        lines.push("FMSG_API_KEY is active and shadows the configured fmsg SecretRef.");
+      }
       return lines;
     },
   },
@@ -199,5 +202,27 @@ export const fmsgSetupWizard: ChannelSetupWizard = {
       useEnv: { clearFields: ["apiKey"] },
     }),
   ],
+  finalize: async ({ cfg, prompter }) => {
+    const home = rawFmsgConfig(cfg).homeChannel?.trim() || process.env.FMSG_HOME_CHANNEL?.trim();
+    const normalized = home ? normalizeFmsgAddress(home) : undefined;
+    if (!normalized) return;
+    const ownerEntry = `fmsg:${normalized}`;
+    const owners = cfg.commands?.ownerAllowFrom ?? [];
+    if (owners.some((entry) => String(entry).toLowerCase() === ownerEntry)) return;
+    const grantOwner = await prompter.confirm({
+      message: `Allow ${normalized} to use privileged OpenClaw owner commands over fmsg?`,
+      initialValue: false,
+    });
+    if (!grantOwner) return;
+    return {
+      cfg: {
+        ...cfg,
+        commands: {
+          ...cfg.commands,
+          ownerAllowFrom: [...owners, ownerEntry],
+        },
+      },
+    };
+  },
   disable: (cfg) => setSetupChannelEnabled(cfg, "fmsg", false),
 };

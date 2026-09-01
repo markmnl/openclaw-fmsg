@@ -74,6 +74,7 @@ async function sendPayload(ctx: ChannelMessageSendPayloadContext) {
     mediaAccess: ctx.mediaAccess,
     mediaLocalRoots: ctx.mediaLocalRoots,
     mediaReadFile: ctx.mediaReadFile,
+    noReply: (ctx.payload.channelData?.fmsg as { noReply?: unknown } | undefined)?.noReply === true,
     signal: ctx.signal,
   });
   return {
@@ -216,6 +217,14 @@ export const fmsgChannelPlugin: ChannelPlugin<ResolvedFmsgAccount> = createChatC
         replyToMode: "all",
         hasRepliedRef,
       }),
+    },
+    directory: {
+      self: async ({ cfg, accountId }) => {
+        const { resolveFmsgService } = await import("./service.js");
+        const service = await resolveFmsgService({ cfg, accountId });
+        const identity = (await service.client.getToken()).sender;
+        return { kind: "user", id: identity, name: identity, handle: identity };
+      },
     },
     message: messageAdapter,
     gateway: {

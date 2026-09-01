@@ -1,4 +1,5 @@
 import { normalizeFmsgAddress } from "./config.js";
+import { compareFmsgMessageIds } from "./message-id.js";
 function pushAddress(target, seen, raw) {
     if (!raw)
         return;
@@ -58,11 +59,7 @@ export async function findMostRecentDirectMessage(client, counterparty, signal) 
         if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime !== rightTime) {
             return rightTime - leftTime;
         }
-        const leftNumber = Number(left.id);
-        const rightNumber = Number(right.id);
-        return Number.isFinite(leftNumber) && Number.isFinite(rightNumber)
-            ? rightNumber - leftNumber
-            : right.id.localeCompare(left.id);
+        return compareFmsgMessageIds(right.id, left.id);
     });
     return messages[0];
 }

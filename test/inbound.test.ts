@@ -74,6 +74,7 @@ describe("fmsg inbound policy and reply delivery", () => {
     });
     let contextInput: Record<string, unknown> | undefined;
     const dispatch = vi.fn(async (request: { delivery: { deliver: (payload: unknown, info: unknown) => Promise<void> } }) => {
+      expect(request.delivery).toHaveProperty("durable");
       await request.delivery.deliver({ text: "first" }, { kind: "block" });
       await request.delivery.deliver({ text: "second" }, { kind: "final" });
       return { admission: { kind: "dispatch" }, dispatched: true };
@@ -90,12 +91,91 @@ describe("fmsg inbound policy and reply delivery", () => {
     });
     const drafts = server.requests
       .filter((request) => request.method === "POST" && request.path === "/fmsg")
-      .map((request) => request.body as { pid: string; to: string[]; data: string });
+      .map((request) => request.body as { pid: number; to: string[]; data: string });
     expect(drafts).toHaveLength(2);
-    expect(drafts[0]).toMatchObject({ pid: "60", to: ["@alice@example.net", "@bob@example.org"], data: "first" });
-    expect(drafts[1]).toMatchObject({ pid: "61", to: ["@alice@example.net", "@bob@example.org"], data: "second" });
+    expect(drafts[0]).toMatchObject({ pid: 60, to: ["@alice@example.net", "@bob@example.org"], data: "first" });
+    expect(drafts[1]).toMatchObject({ pid: 61, to: ["@alice@example.net", "@bob@example.org"], data: "second" });
     expect(service.state.inspectTurnWindow("60", 8, 60_000).count).toBe(1);
     expect(contextInput?.extra).toMatchObject({ FmsgImportant: true, FmsgNoReply: false });
     expect((contextInput?.message as { bodyForAgent?: string }).bodyForAgent).toContain("important=true");
+  });
+
+  it("advances durable reply parents and marks the final allowed turn no_reply", async () => {
+    service.config.maxAgentTurnsPerThread = 1;
+    const message = server.seedMessage({
+      id: 65,
+      from: "@alice@example.net",
+      to: ["@agent@example.com"],
+      data: "answer once",
+    });
+    const dispatch = vi.fn(async (request: {
+      delivery: {
+        preparePayload: (payload: Record<string, unknown>) => Record<string, unknown>;
+        durable: () => { replyToId?: string; replyToMode?: string; threadId?: string };
+        onDelivered: (payload: unknown, info: unknown, result: unknown) => Promise<void>;
+      };
+    }) => {
+      expect(request.delivery.preparePayload({ text: "first" })).toMatchObject({
+        channelData: { fmsg: { noReply: true } },
+      });
+      expect(request.delivery.durable()).toMatchObject({
+        replyToId: "65",
+        replyToMode: "all",
+        threadId: "65",
+      });
+      await request.delivery.onDelivered({}, {}, {
+        receipt: { primaryPlatformMessageId: "66" },
+      });
+      expect(request.delivery.durable()).toMatchObject({ replyToId: "66" });
+      return {
+        admission: { kind: "dispatch" },
+        dispatched: true,
+        dispatchResult: {
+          settledReceipt: { counts: {}, anyVisibleDelivered: true },
+        },
+      };
+    });
+
+    await handleFmsgInbound({
+      cfg: {} as never,
+      account: service,
+      channelRuntime: { inbound: { dispatch } } as never,
+      message,
+    });
+    expect(service.state.inspectTurnWindow("65", 1, 60_000).count).toBe(1);
+  });
+
+  it("does not acknowledge an inbound message when every reply delivery fails", async () => {
+    const message = server.seedMessage({
+      id: 70,
+      from: "@alice@example.net",
+      to: ["@agent@example.com"],
+      data: "please answer",
+    });
+    const errors: string[] = [];
+    service.log = { error: (value) => errors.push(value) };
+    const dispatch = vi.fn(async (request: {
+      delivery: { onError?: (error: unknown) => void };
+    }) => {
+      request.delivery.onError?.(new Error("simulated transport rejection"));
+      return {
+        admission: { kind: "dispatch" },
+        dispatched: true,
+        dispatchResult: {
+          settledReceipt: { counts: {}, anyVisibleDelivered: false },
+        },
+      };
+    });
+
+    await expect(handleFmsgInbound({
+      cfg: {} as never,
+      account: service,
+      channelRuntime: { inbound: { dispatch } } as never,
+      message,
+    })).rejects.toThrow("did not deliver");
+    expect(service.state.hasProcessed("70")).toBe(false);
+    expect(server.requests.map((request) => `${request.method} ${request.path}`))
+      .not.toContain("POST /fmsg/70/read");
+    expect(errors.join("\n")).toContain("reply not delivered for message 70 branch 70");
   });
 });

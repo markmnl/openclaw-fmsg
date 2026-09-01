@@ -67,5 +67,13 @@ jobs:
       - name: Verify package contents
         run: npm pack --dry-run --ignore-scripts
 
+      - name: Set up Go for real fmsg acceptance
+        uses: actions/setup-go@v6
+        with:
+          go-version: stable
+
+      - name: Run real fmsg acceptance
+        run: bash .github/scripts/run-fmsg-docker-e2e.sh
+
       - name: Publish package
         run: npm publish --access public

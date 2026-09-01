@@ -2,12 +2,17 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { FmsgStateStore } from "../src/state.js";
+import { compareMessageIds, FmsgStateStore } from "../src/state.js";
 import { participantsFromMessage, replyAllRecipients } from "../src/threading.js";
 
 describe("thread mapping and state", () => {
   let directory: string;
   let state: FmsgStateStore;
+
+  it("orders full-range int64 ids without floating-point precision loss", () => {
+    expect(compareMessageIds("9223372036854775807", "9223372036854775806")).toBe(1);
+    expect(compareMessageIds("9007199254740992", "9007199254740993")).toBe(-1);
+  });
 
   beforeEach(async () => {
     directory = await mkdtemp(path.join(os.tmpdir(), "openclaw-fmsg-test-"));

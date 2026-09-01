@@ -1,11 +1,13 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { compareFmsgMessageIds } from "./message-id.js";
 import { participantsFromMessage } from "./threading.js";
 const EMPTY_STATE = {
     version: 1,
     messages: {},
     children: {},
     processed: [],
+    pendingInbound: [],
     lastInboundByBranch: {},
     lastOutboundByBranch: {},
     turnTimestampsByBranch: {},
@@ -34,6 +36,7 @@ export class FmsgStateStore {
                     messages: parsed.messages ?? {},
                     children: parsed.children ?? {},
                     processed: parsed.processed ?? [],
+                    pendingInbound: parsed.pendingInbound ?? [],
                     lastInboundByBranch: parsed.lastInboundByBranch ?? {},
                     lastOutboundByBranch: parsed.lastOutboundByBranch ?? {},
                     turnTimestampsByBranch: parsed.turnTimestampsByBranch ?? {},
@@ -63,6 +66,7 @@ export class FmsgStateStore {
     async markProcessed(messageId) {
         if (!this.state.processed.includes(messageId))
             this.state.processed.push(messageId);
+        this.state.pendingInbound = this.state.pendingInbound.filter((id) => id !== messageId);
         if (this.state.processed.length > 5000)
             this.state.processed.splice(0, this.state.processed.length - 5000);
         if (!this.state.highWaterId || compareMessageIds(messageId, this.state.highWaterId) > 0) {
@@ -72,6 +76,9 @@ export class FmsgStateStore {
     }
     get highWaterId() {
         return this.state.highWaterId;
+    }
+    get pendingInboundIds() {
+        return [...this.state.pendingInbound];
     }
     getMessage(id) {
         return this.state.messages[id];
@@ -93,6 +100,8 @@ export class FmsgStateStore {
         const existing = this.state.messages[message.id];
         if (existing) {
             if (options.inbound) {
+                if (!this.state.pendingInbound.includes(message.id))
+                    this.state.pendingInbound.push(message.id);
                 this.state.lastInboundByBranch[existing.branchId] = message.id;
                 delete this.state.lastOutboundByBranch[existing.branchId];
             }
@@ -146,6 +155,8 @@ export class FmsgStateStore {
             ...(message.no_reply ? { noReply: true } : {}),
         };
         if (options.inbound) {
+            if (!this.state.pendingInbound.includes(message.id))
+                this.state.pendingInbound.push(message.id);
             this.state.lastInboundByBranch[branchId] = message.id;
             delete this.state.lastOutboundByBranch[branchId];
         }
@@ -202,9 +213,5 @@ export class FmsgStateStore {
     }
 }
 export function compareMessageIds(left, right) {
-    const leftNumber = Number(left);
-    const rightNumber = Number(right);
-    if (Number.isFinite(leftNumber) && Number.isFinite(rightNumber))
-        return leftNumber - rightNumber;
-    return left.localeCompare(right);
+    return compareFmsgMessageIds(left, right);
 }

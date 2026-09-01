@@ -150,4 +150,29 @@ describe("fmsg setup and SecretRef integration", () => {
     });
     expect((configured?.channels as never as { fmsg: Record<string, unknown> }).fmsg.apiKey).toEqual(ref);
   });
+
+  it("offers owner authority as an explicit opt-in", async () => {
+    const base = {
+      channels: { fmsg: { homeChannel: "@owner@example.com" } },
+    } as never;
+    const declined = await fmsgSetupWizard.finalize?.({
+      cfg: base,
+      accountId: "default",
+      credentialValues: {},
+      runtime: {} as never,
+      prompter: { confirm: async () => false } as never,
+      forceAllowFrom: false,
+    });
+    expect(declined).toBeUndefined();
+
+    const accepted = await fmsgSetupWizard.finalize?.({
+      cfg: base,
+      accountId: "default",
+      credentialValues: {},
+      runtime: {} as never,
+      prompter: { confirm: async () => true } as never,
+      forceAllowFrom: false,
+    });
+    expect(accepted?.cfg?.commands?.ownerAllowFrom).toContain("fmsg:@owner@example.com");
+  });
 });

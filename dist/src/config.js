@@ -72,7 +72,7 @@ export const fmsgChannelConfigSchema = buildJsonChannelConfigSchema(fmsgChannelJ
         },
         homeChannel: {
             label: "Home fmsg address",
-            help: "Owner address in @user@domain form.",
+            help: "Default operator destination and fallback allowlist entry in @user@domain form; this does not grant OpenClaw owner privileges.",
         },
     },
 });

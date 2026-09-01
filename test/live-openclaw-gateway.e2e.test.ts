@@ -140,6 +140,7 @@ describe.skipIf(!enabled)("live OpenClaw gateway", () => {
     const workspace = path.join(temporary, "workspace");
     await mkdir(workspace, { recursive: true });
     const configPath = path.join(temporary, "openclaw.json");
+    const port = await unusedPort();
     const secretsPath = path.join(temporary, "secrets.json");
     await writeFile(secretsPath, JSON.stringify({
       fmsg: { apiKey: "fmsgk_agent-test" },
@@ -147,7 +148,7 @@ describe.skipIf(!enabled)("live OpenClaw gateway", () => {
     }));
     await chmod(secretsPath, 0o600);
     await writeFile(configPath, JSON.stringify({
-      gateway: { mode: "local", bind: "loopback", auth: { mode: "none" } },
+      gateway: { mode: "local", bind: "loopback", port, auth: { mode: "none" } },
       secrets: {
         providers: {
           "fmsg-test": { source: "file", path: secretsPath, mode: "json" },
@@ -190,6 +191,7 @@ describe.skipIf(!enabled)("live OpenClaw gateway", () => {
           enabled: true,
           apiUrl: fmsg.url,
           apiKey: { source: "file", provider: "fmsg-test", id: "/fmsg/apiKey" },
+          homeChannel: "@alice@example.net",
           allowedUsers: ["@alice@example.net"],
           maxAgentTurnsPerThread: 8,
           agentTurnWindowMs: 60_000,
@@ -197,7 +199,6 @@ describe.skipIf(!enabled)("live OpenClaw gateway", () => {
       },
     }, null, 2));
 
-    const port = await unusedPort();
     const {
       FMSG_API_KEY: _ignoredFmsgApiKey,
       FMSG_API_URL: _ignoredFmsgApiUrl,
@@ -243,6 +244,7 @@ describe.skipIf(!enabled)("live OpenClaw gateway", () => {
           : undefined,
         "the fmsg gateway connection",
       );
+      expect(logs).toContain("[fmsg] connected as @agent@example.com");
       const root = fmsg.seedMessage({
         id: "100",
         from: "@alice@example.net",
@@ -253,7 +255,7 @@ describe.skipIf(!enabled)("live OpenClaw gateway", () => {
       });
       fmsg.pushNewMessage(root);
       const rootReply = await waitFor(
-        () => draftRequests(fmsg).find((request) => (request.body as FmsgMessage | undefined)?.pid === "100"),
+        () => draftRequests(fmsg).find((request) => (request.body as { pid?: number } | undefined)?.pid === 100),
         "the root reply",
       );
       expect((rootReply.body as FmsgMessage).to).toEqual([
@@ -278,7 +280,7 @@ describe.skipIf(!enabled)("live OpenClaw gateway", () => {
       });
       fmsg.pushNewMessage(firstChild);
       await waitFor(
-        () => draftRequests(fmsg).find((request) => (request.body as FmsgMessage | undefined)?.pid === "200"),
+        () => draftRequests(fmsg).find((request) => (request.body as { pid?: number } | undefined)?.pid === 200),
         "the first-child reply",
       );
 
@@ -292,7 +294,7 @@ describe.skipIf(!enabled)("live OpenClaw gateway", () => {
       });
       fmsg.pushNewMessage(sibling);
       await waitFor(
-        () => draftRequests(fmsg).find((request) => (request.body as FmsgMessage | undefined)?.pid === "300"),
+        () => draftRequests(fmsg).find((request) => (request.body as { pid?: number } | undefined)?.pid === 300),
         "the sibling-branch reply",
       );
 
@@ -318,6 +320,59 @@ describe.skipIf(!enabled)("live OpenClaw gateway", () => {
         "agent:main:fmsg:direct:@alice@example.net:thread:100:br:300",
       );
       expect(model.requests.length).toBeGreaterThanOrEqual(3);
+
+      const stopped = new Promise<void>((resolve) => child.once("exit", () => resolve()));
+      child.kill("SIGTERM");
+      await Promise.race([
+        stopped,
+        new Promise<never>((_resolve, reject) =>
+          setTimeout(() => reject(new Error("gateway did not stop for restart acceptance")), 10_000),
+        ),
+      ]);
+      fmsg.seedMessage({
+        id: "400",
+        from: "@alice@example.net",
+        to: ["@agent@example.com"],
+        data: "arrived while gateway was stopped",
+      });
+      const restarted = spawn(process.execPath, [
+        cli,
+        "gateway",
+        "run",
+        "--port",
+        String(port),
+        "--bind",
+        "loopback",
+        "--auth",
+        "none",
+        "--verbose",
+      ], {
+        cwd: temporary,
+        env: commandEnv,
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      processes.push(restarted);
+      let restartLogs = "";
+      restarted.stdout.on("data", (chunk) => { restartLogs += chunk.toString(); });
+      restarted.stderr.on("data", (chunk) => { restartLogs += chunk.toString(); });
+      await waitFor(
+        () => restartLogs.includes("[fmsg] connected as @agent@example.com")
+          ? true
+          : undefined,
+        "the restarted fmsg gateway connection",
+      );
+      await waitFor(
+        () => draftRequests(fmsg).find(
+          (request) => (request.body as { pid?: number } | undefined)?.pid === 400,
+        ),
+        "the inbox catch-up reply after restart",
+      );
+      await waitFor(
+        () => restartLogs.includes("[fmsg] inbox catch-up complete (1 message)")
+          ? true
+          : undefined,
+        "the completed inbox catch-up",
+      );
     } catch (error) {
       throw new Error(`${String(error)}\nOpenClaw gateway logs:\n${logs}`);
     } finally {

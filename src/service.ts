@@ -12,6 +12,12 @@ export type ActiveFmsgAccount = {
   client: FmsgClient;
   state: FmsgStateStore;
   log?: LogSink;
+  setStatus?: (patch: {
+    lastInboundAt?: number;
+    lastOutboundAt?: number;
+    lastError?: string | null;
+    stateReason?: string;
+  }) => void;
 };
 
 const activeAccounts = new Map<string, ActiveFmsgAccount>();

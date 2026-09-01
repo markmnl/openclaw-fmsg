@@ -73,10 +73,10 @@ Alternatively, configure the channel explicitly:
 }
 ```
 
-Restart the gateway. A successful WebSocket connection logs:
+Restart the gateway. A successful WebSocket connection identifies the address obtained from the JWT:
 
 ```text
-fmsg connected
+fmsg connected as @agent@example.com
 ```
 
 The sender address is always read from the exchanged JWT's `sub` claim. `homeChannel` is not a from-address.
@@ -103,7 +103,7 @@ An `env` SecretRef still requires the named variable in the Gateway environment.
 }
 ```
 
-When the legacy `FMSG_API_KEY` environment variable is present, it remains authoritative and a configured `apiKey` SecretRef is treated as inactive.
+When the legacy `FMSG_API_KEY` environment variable is present, it remains authoritative and a configured `apiKey` SecretRef is treated as inactive. Setup, Gateway logs, and the secrets audit warn about this shadowing. Remove the obsolete environment entry after migrating; the plugin never deletes credentials automatically.
 
 ## Configuration
 
@@ -113,7 +113,7 @@ Environment values take precedence over `channels.fmsg`. `apiUrl` is required: t
 |---|---|---:|---|
 | `apiUrl` | `FMSG_API_URL` | required | Explicit fmsg Web API base URL |
 | `apiKey` | `FMSG_API_KEY` | required | `fmsgk_...` credential or OpenClaw SecretRef |
-| `homeChannel` | `FMSG_HOME_CHANNEL` | prompted by setup | Owner address and fallback sole allowlist entry |
+| `homeChannel` | `FMSG_HOME_CHANNEL` | prompted by setup | Default operator destination and fallback sole allowlist entry |
 | `allowedUsers` | `FMSG_ALLOWED_USERS` | `[]` | Allowed inbound senders; environment form is comma-separated |
 | `allowAllUsers` | `FMSG_ALLOW_ALL_USERS` | `false` | Explicitly allow every valid fmsg sender |
 | `maxAgentTurnsPerThread` | `FMSG_MAX_AGENT_TURNS_PER_THREAD` | `8` | Automatic OpenClaw turns allowed per branch/window; `0` disables |
@@ -126,6 +126,51 @@ Access is default-deny:
 - An empty list with `homeChannel` configured uses that address as the effective sole allowlist and logs a warning.
 - With neither value configured, all inbound messages are rejected with a clear warning.
 - `allowAllUsers: true` is the only open-access setting.
+
+### Access, owner authority, and scheduled delivery
+
+These settings deliberately have different jobs:
+
+| Setting | Purpose |
+|---|---|
+| `channels.fmsg.allowedUsers` | Who may send ordinary inbound messages |
+| `channels.fmsg.homeChannel` | Default operator destination and fallback inbound allowlist entry |
+| `commands.ownerAllowFrom` | Who may use privileged OpenClaw owner commands |
+| `agents.defaults.heartbeat.target` | Heartbeat route mode: `owner`, `last`, `none`, or a channel such as `fmsg` |
+| `agents.defaults.heartbeat.to` | Explicit destination when a channel target is selected |
+
+`homeChannel` does not grant owner privileges. Interactive setup offers that privilege separately and defaults to no. To configure it manually:
+
+```json
+{
+  "commands": {
+    "ownerAllowFrom": ["fmsg:@owner@example.com"]
+  }
+}
+```
+
+A concrete effective fmsg allowlist can supply OpenClaw's default `owner` heartbeat route. An explicit route looks like:
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "heartbeat": {
+        "target": "fmsg",
+        "to": "@owner@example.com"
+      }
+    }
+  }
+}
+```
+
+Heartbeat routing is independent of proactive messaging: `fmsg_send` can initiate a message without granting its recipient owner authority.
+
+### First-run verification
+
+Run `openclaw status --deep` after setup. The fmsg account reports its JWT-derived identity, API URL, credential source, access policy, effective allowlist, connection state, and recent delivery errors without exposing the credential.
+
+Do not treat a session transcript as proof of delivery. Confirm the reply arrived in the peer's fmsg inbox. For a fuller smoke test, verify a root reply, a later sibling branch, reply-all, an attachment, `no_reply`, and restart catch-up.
 
 ## Thread and session mapping
 
@@ -153,6 +198,7 @@ Outbound replies:
 - If one OpenClaw turn emits several messages, the first replies to the inbound and each subsequent message replies to the preceding outbound message.
 - A new inbound resets that output chain.
 - Agent-initiated continuation selects only the latest strict one-to-one thread with the address. It never auto-selects a multi-party thread.
+- Protocol IDs remain decimal strings internally and are emitted as exact JSON `int64` numbers at the Web API boundary, including values above JavaScript's safe-integer range.
 
 ## Agent tool
 
@@ -177,8 +223,13 @@ By default it continues the latest strict one-to-one thread. Set `fmsg_new_threa
 - Operators can tune both circuit-breaker values or set `maxAgentTurnsPerThread: 0` to rely entirely on agent discretion.
 - Inbound bodies, ancestry, topics, addresses, and filenames are untrusted.
 - `fmsgk_...` and compact JWT-shaped strings are redacted immediately before any outbound text is drafted and from plugin error logs.
+- `senderIsOwner` is derived from `commands.ownerAllowFrom`, not ordinary channel access. `senderKind` remains unknown unless fmsg eventually supplies authenticated human/agent metadata; the plugin does not guess from addresses.
 
 Runtime routing state is stored under OpenClaw's state directory in `fmsg/<account>.json`, with bounded message and deduplication history.
+
+Final replies use OpenClaw's durable outbound path. An inbound message is acknowledged only after delivery settles or the plugin intentionally suppresses a reply. Definite pre-send failures remain eligible for inbox catch-up after reconnect. fmsg currently exposes no verified idempotency key or send-reconciliation contract to this plugin, so an interrupted request after platform dispatch is treated as an ambiguous outcome rather than retried blindly.
+
+Restarting the whole Gateway can interrupt a model turn. The plugin persists routing state before dispatch, drains its in-process receive queue during graceful shutdown, and catches up unacknowledged inbox messages after reconnect; it cannot preserve an executing model process across termination.
 
 ## Development
 
@@ -196,7 +247,7 @@ Stable releases are published to npm by `.github/workflows/publish.yml` when a G
 
 The npm package must configure a trusted GitHub Actions publisher for repository `markmnl/openclaw-fmsg`, workflow `publish.yml`, with `npm publish` allowed. The workflow uses short-lived OIDC credentials and does not require an npm token secret.
 
-The unit suite runs an in-memory HTTP and WebSocket implementation of the fmsg Web API. It covers JWT exchange/refresh, drafts and attachments, WebSocket plus inbox catch-up, access control, branch mapping, native session routing, reply-all, output chaining, proactive one-to-one continuation, flags, secret redaction, persistence, and the circuit breaker.
+The unit suite runs a strict in-memory HTTP and WebSocket implementation of the fmsg Web API. It enforces numeric `pid` input and covers full-range `int64` preservation, JWT exchange/refresh, drafts and attachments, WebSocket plus inbox catch-up, access control, branch mapping, native session routing, reply-all, output chaining, proactive one-to-one continuation, flags, secret redaction, persistence, delivery failure acknowledgement, and the circuit breaker.
 
 ### Live OpenClaw gateway acceptance
 
@@ -210,7 +261,7 @@ Set `OPENCLAW_E2E_ROOT` to an OpenClaw package directory when it is not availabl
 
 ### fmsg-docker e2e
 
-The opt-in e2e test expects two provisioned identities in an already-running [fmsg-docker](https://github.com/markmnl/fmsg-docker) environment:
+The e2e test expects two provisioned identities in an already-running [fmsg-docker](https://github.com/markmnl/fmsg-docker) environment:
 
 ```bash
 FMSG_E2E=1 \
@@ -222,6 +273,8 @@ npm run test:e2e
 ```
 
 The addresses are derived from the JWTs. The test sends a root with an attachment, observes WebSocket delivery, downloads the attachment, replies through the second deployment, and verifies the reply's `pid`.
+
+Pull requests and npm releases also run `.github/scripts/run-fmsg-docker-e2e.sh`, which provisions isolated real stacks at a pinned fmsg-docker revision before running this acceptance.
 
 ## License
 

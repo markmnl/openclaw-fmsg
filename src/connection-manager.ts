@@ -1,9 +1,9 @@
 import WebSocket from "ws";
-import { normalizeFmsgMessage, type FmsgClient } from "./client.js";
+import { FmsgClient, normalizeFmsgMessage } from "./client.js";
 import { formatSafeError } from "./redact.js";
 import type { FmsgStateStore } from "./state.js";
 import { compareMessageIds } from "./state.js";
-import type { FmsgMessage, LogSink } from "./types.js";
+import type { FmsgMessage, FmsgToken, LogSink } from "./types.js";
 
 export type FmsgConnectionOptions = {
   client: FmsgClient;
@@ -11,7 +11,8 @@ export type FmsgConnectionOptions = {
   signal: AbortSignal;
   log?: LogSink;
   onMessage: (message: FmsgMessage) => Promise<void>;
-  onReady?: () => void;
+  onReady?: (token: FmsgToken) => void;
+  onReconnectAttempt?: (attempt: number) => void;
   random?: () => number;
 };
 
@@ -102,21 +103,37 @@ function closeAndWait(socket: WebSocket): Promise<void> {
   });
 }
 
-async function catchUp(options: FmsgConnectionOptions, enqueue: (message: FmsgMessage) => Promise<void>): Promise<void> {
-  const collected: FmsgMessage[] = [];
+async function catchUp(options: FmsgConnectionOptions, enqueue: (message: FmsgMessage) => Promise<void>): Promise<number> {
+  const collected = new Map<string, FmsgMessage>();
+  for (const id of options.state.pendingInboundIds) {
+    if (options.signal.aborted || options.state.hasProcessed(id)) continue;
+    try {
+      const pending = await options.client.getMessage(id, options.signal);
+      collected.set(pending.id, pending);
+    } catch (error) {
+      options.log?.warn?.(`fmsg pending inbox recovery failed for ${id}: ${formatSafeError(error)}`);
+    }
+  }
   let offset = 0;
   const pageSize = 100;
-  while (!options.signal.aborted && collected.length < 1000) {
+  while (!options.signal.aborted && offset < 1000) {
     const page = await options.client.listInbox(pageSize, offset, options.signal);
-    collected.push(...page);
-    if (page.length < pageSize || page.some((message) => options.state.hasProcessed(message.id))) break;
+    for (const message of page) collected.set(message.id, message);
+    if (page.length < pageSize) break;
     offset += page.length;
   }
+  const messages = [...collected.values()];
   const selected = options.state.highWaterId
-    ? collected.filter((message) => !options.state.hasProcessed(message.id))
-    : collected.filter((message) => !message.read).slice(0, 50);
+    ? messages.filter((message) => !options.state.hasProcessed(message.id))
+    : messages.filter((message) => !message.read).slice(0, 50);
   selected.sort((left, right) => compareMessageIds(left.id, right.id));
-  for (const message of selected) await enqueue(message);
+  let delivered = 0;
+  for (const message of selected) {
+    if (options.signal.aborted) break;
+    await enqueue(message);
+    delivered++;
+  }
+  return delivered;
 }
 
 export async function runFmsgConnection(options: FmsgConnectionOptions): Promise<void> {
@@ -127,6 +144,7 @@ export async function runFmsgConnection(options: FmsgConnectionOptions): Promise
     let queue = Promise.resolve();
     const connectedAt = Date.now();
     try {
+      options.onReconnectAttempt?.(attempt);
       const opened = await options.client.openWebSocket();
       socket = opened.socket;
       const enqueue = (message: FmsgMessage) => {
@@ -149,9 +167,10 @@ export async function runFmsgConnection(options: FmsgConnectionOptions): Promise
       });
       socket.on("error", (error) => options.log?.warn?.(`fmsg websocket error: ${formatSafeError(error)}`));
       await waitForOpen(socket, options.signal);
-      options.log?.info?.("fmsg connected");
-      options.onReady?.();
-      await catchUp(options, enqueue);
+      options.log?.info?.(`fmsg connected as ${opened.token.sender}`);
+      options.onReady?.(opened.token);
+      const caughtUp = await catchUp(options, enqueue);
+      options.log?.info?.(`fmsg inbox catch-up complete (${caughtUp} message${caughtUp === 1 ? "" : "s"})`);
       const tokenTtlMs = Math.max(1000, opened.token.expiresAtMs - Date.now());
       const refreshMarginMs = Math.min(300_000, Math.floor(tokenTtlMs / 2));
       await waitForClose(socket, options.signal, tokenTtlMs - refreshMarginMs);
@@ -171,11 +190,7 @@ export async function runFmsgConnection(options: FmsgConnectionOptions): Promise
 }
 
 function FmsgClientEvent(raw: WebSocket.RawData) {
-  try {
-    return JSON.parse(raw.toString()) as { type?: string; data?: unknown };
-  } catch {
-    return undefined;
-  }
+  return FmsgClient.parseWsEvent(raw);
 }
 
 function isMessage(value: unknown): value is FmsgMessage {

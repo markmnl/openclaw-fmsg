@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { FmsgClient } from "../src/client.js";
+import { FmsgClient, normalizeFmsgMessage } from "../src/client.js";
+import { compareFmsgMessageIds, parseFmsgJson } from "../src/message-id.js";
 import { FakeFmsgServer } from "./fake-fmsg-server.js";
 
 describe("FmsgClient", () => {
@@ -38,6 +39,54 @@ describe("FmsgClient", () => {
     expect(draft.data).not.toContain("fmsgk_");
     expect(draft.data).toContain("[REDACTED_JWT]");
     expect(draft.size).toBe(Buffer.byteLength(draft.data));
+  });
+
+  it("writes reply pid as an exact JSON int64 rather than a string", async () => {
+    const client = new FmsgClient(server.url, "fmsgk_agent-test", { refreshMarginMs: 0 });
+    await client.sendMessage({
+      to: ["@alice@example.net"],
+      pid: "3517",
+      text: "reply",
+    });
+    const draft = server.requests.find((request) => request.method === "POST" && request.path === "/fmsg");
+    expect(draft?.body).toMatchObject({ pid: 3517 });
+    expect(draft?.rawBody).toMatch(/"pid":3517(?:,|\})/u);
+    expect(draft?.rawBody).not.toContain('"pid":"3517"');
+  });
+
+  it("preserves the full signed-int64 range in inbound and outbound ids", async () => {
+    const maximum = "9223372036854775807";
+    expect(parseFmsgJson<{ id: string; pid: string }>(
+      `{"id":${maximum},"pid":9223372036854775806}`,
+    )).toEqual({ id: maximum, pid: "9223372036854775806" });
+    expect(normalizeFmsgMessage({ id: maximum, pid: "9223372036854775806", from: "@a@b", to: ["@c@d"] }))
+      .toMatchObject({ id: maximum, pid: "9223372036854775806" });
+    expect(compareFmsgMessageIds(maximum, "9223372036854775806")).toBe(1);
+
+    const client = new FmsgClient(server.url, "fmsgk_agent-test", { refreshMarginMs: 0 });
+    server.seedMessage({
+      id: maximum,
+      pid: "9223372036854775806",
+      from: "@alice@example.net",
+      to: ["@agent@example.com"],
+      data: "maximum id",
+    });
+    await expect(client.listInbox()).resolves.toEqual([
+      expect.objectContaining({ id: maximum, pid: "9223372036854775806" }),
+    ]);
+    await client.sendMessage({ to: ["@alice@example.net"], pid: maximum, text: "large reply" });
+    const draft = server.requests.find((request) => request.method === "POST" && request.path === "/fmsg");
+    expect(draft?.rawBody).toContain(`"pid":${maximum}`);
+  });
+
+  it("rejects malformed or out-of-range reply ids before sending", async () => {
+    const client = new FmsgClient(server.url, "fmsgk_agent-test", { refreshMarginMs: 0 });
+    await expect(client.sendMessage({
+      to: ["@alice@example.net"],
+      pid: "9223372036854775808",
+      text: "reply",
+    })).rejects.toThrow("out-of-range pid");
+    expect(server.requests.some((request) => request.method === "POST" && request.path === "/fmsg")).toBe(false);
   });
 
   it("refreshes once after a protected request returns 401", async () => {
