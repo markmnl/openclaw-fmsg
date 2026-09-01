@@ -96,8 +96,21 @@ describe("fmsg inbound policy and reply delivery", () => {
     expect(drafts[0]).toMatchObject({ pid: 60, to: ["@alice@example.net", "@bob@example.org"], data: "first" });
     expect(drafts[1]).toMatchObject({ pid: 61, to: ["@alice@example.net", "@bob@example.org"], data: "second" });
     expect(service.state.inspectTurnWindow("60", 8, 60_000).count).toBe(1);
-    expect(contextInput?.extra).toMatchObject({ FmsgImportant: true, FmsgNoReply: false });
-    expect((contextInput?.message as { bodyForAgent?: string }).bodyForAgent).toContain("important=true");
+    expect(contextInput?.conversation).toMatchObject({
+      kind: "direct",
+      id: "@alice@example.net",
+    });
+    expect(contextInput?.reply).toMatchObject({ to: "fmsg:@alice@example.net" });
+    expect(contextInput?.extra).toMatchObject({
+      FmsgParticipants: ["@alice@example.net", "@bob@example.org"],
+      FmsgImportant: true,
+      FmsgNoReply: false,
+    });
+    const bodyForAgent = (contextInput?.message as { bodyForAgent?: string }).bodyForAgent;
+    expect(bodyForAgent).toContain("important=true");
+    expect(bodyForAgent).toContain(
+      'participants other than this OpenClaw address: ["@alice@example.net","@bob@example.org"]',
+    );
   });
 
   it("advances durable reply parents and marks the final allowed turn no_reply", async () => {

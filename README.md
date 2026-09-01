@@ -193,8 +193,10 @@ The first discovered child continues its parent's session; later discovered sibl
 
 Outbound replies:
 
+- Multi-recipient inbound messages keep the sender-scoped direct session key, while all normalized participants other than the channel's own address are included as untrusted model context.
 - Reply to the direct parent message.
 - Reply-all to `from`, `to`, every `add_to_from`, and every `add_to.to` on that parent, excluding the JWT sender.
+- If the live parent lookup fails, reply-all uses the persisted routing record and logs a warning instead of silently dropping co-recipients.
 - If one OpenClaw turn emits several messages, the first replies to the inbound and each subsequent message replies to the preceding outbound message.
 - A new inbound resets that output chain.
 - Agent-initiated continuation selects only the latest strict one-to-one thread with the address. It never auto-selects a multi-party thread.

@@ -5,7 +5,7 @@ import { saveMediaBuffer } from "openclaw/plugin-sdk/media-store";
 import { isFmsgSenderAllowed, normalizeFmsgAddress, resolveEffectiveAllowedUsers } from "./config.js";
 import { formatSafeError } from "./redact.js";
 import { sendFmsgOutbound } from "./outbound.js";
-import { buildAncestryContext, isStrictDmWith } from "./threading.js";
+import { buildAncestryContext, isStrictDmWith, participantsFromMessage } from "./threading.js";
 function timestampMs(value) {
     if (typeof value === "number")
         return value < 10_000_000_000 ? value * 1000 : value;
@@ -55,6 +55,7 @@ export async function handleFmsgInbound(params) {
         service.state.assignMessage(ancestor);
     const assignment = service.state.assignMessage(message, { inbound: true });
     const ownAddress = (await service.client.getToken()).sender;
+    const participants = participantsFromMessage(message).filter((address) => address !== ownAddress);
     if (isStrictDmWith(message, sender, ownAddress)) {
         await service.state.rememberDirect(sender, message.id);
     }
@@ -132,8 +133,12 @@ export async function handleFmsgInbound(params) {
     const flags = [message.important ? "important=true" : "", message.no_reply ? "no_reply=true" : ""]
         .filter(Boolean)
         .join(" ");
+    const participantContext = participants.length > 1
+        ? `[fmsg participants — untrusted; participants other than this OpenClaw address: ${JSON.stringify(participants)}]`
+        : "";
     const bodyForAgent = [
         ancestry.context,
+        participantContext,
         flags ? `[fmsg metadata: ${flags}]` : "",
         body,
     ].filter(Boolean).join("\n\n");
@@ -178,6 +183,7 @@ export async function handleFmsgInbound(params) {
             ReplyToId: message.pid,
             FmsgRootId: assignment.rootId,
             FmsgBranchId: assignment.branchId,
+            FmsgParticipants: participants,
             FmsgImportant: message.important === true,
             FmsgNoReply: false,
         },

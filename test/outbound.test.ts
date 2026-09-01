@@ -1,11 +1,11 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FmsgClient } from "../src/client.js";
 import { fmsgChannelPlugin } from "../src/channel.js";
 import { sendFmsgOutbound } from "../src/outbound.js";
-import { registerActiveFmsgAccount } from "../src/service.js";
+import { getActiveFmsgAccount, registerActiveFmsgAccount } from "../src/service.js";
 import { FmsgStateStore } from "../src/state.js";
 import { FakeFmsgServer } from "./fake-fmsg-server.js";
 
@@ -68,6 +68,46 @@ describe("fmsg outbound semantics", () => {
     ]);
     const draft = server.requests.find((request) => request.method === "POST" && request.path === "/fmsg")?.body as { pid: number; to: string[] };
     expect(draft).toMatchObject({ pid: 10, to: sent.recipients });
+  });
+
+  it("falls back to stored participants and warns when the parent fetch fails", async () => {
+    const parent = server.seedMessage({
+      id: 11,
+      from: "@alice@example.net",
+      to: ["@agent@example.com", "@bob@example.org"],
+      add_to: [{ add_to_from: "@carol@example.net", to: ["@dave@example.org"] }],
+      data: "hello everyone",
+    });
+    state.assignMessage(parent, { inbound: true });
+    const active = getActiveFmsgAccount();
+    expect(active).toBeDefined();
+    const warnings: string[] = [];
+    active!.log = { warn: (message) => warnings.push(message) };
+    const getMessage = vi.spyOn(active!.client, "getMessage")
+      .mockRejectedValue(new Error("simulated parent lookup failure"));
+
+    const sent = await sendFmsgOutbound({
+      cfg: {} as never,
+      to: "@alice@example.net",
+      text: "cached reply-all",
+      replyToId: "11",
+      threadId: "11",
+    });
+
+    expect(getMessage).toHaveBeenCalledWith("11", undefined);
+    expect(sent.recipients).toEqual([
+      "@alice@example.net",
+      "@bob@example.org",
+      "@carol@example.net",
+      "@dave@example.org",
+    ]);
+    expect(warnings.join("\n")).toContain(
+      "parent message 11 fetch failed; using stored participant metadata",
+    );
+    const draft = server.requests.find(
+      (request) => request.method === "POST" && request.path === "/fmsg",
+    )?.body as { to: string[] };
+    expect(draft.to).toEqual(sent.recipients);
   });
 
   it("continues only the most recent strict one-to-one thread", async () => {
