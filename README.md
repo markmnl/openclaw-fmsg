@@ -156,7 +156,7 @@ npm pack --dry-run
 
 ## Releasing
 
-Stable releases are published to npm by `.github/workflows/publish.yml` when a GitHub Release is published. The release tag must exactly match the version in `package.json`, prefixed with `v` (for example, package version `0.1.0` uses tag `v0.1.0`). Build and commit `dist/` with every version change before creating the release.
+Stable releases are published to npm by `.github/workflows/publish.yml` when a GitHub Release is published. Use a stable semantic-version tag such as `v0.1.1`; the workflow derives the npm version from the tag and updates both `package.json` and `package-lock.json` in the release checkout before publishing. Build and commit `dist/` whenever source code changes before creating the release.
 
 The npm package must configure a trusted GitHub Actions publisher for repository `markmnl/openclaw-fmsg`, workflow `publish.yml`, with `npm publish` allowed. The workflow uses short-lived OIDC credentials and does not require an npm token secret.
 

@@ -1,6 +1,6 @@
 {
   "name": "@markmnl/openclaw-fmsg",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "OpenClaw channel plugin for the federated messaging protocol fmsg",
   "type": "module",
   "license": "MIT",
