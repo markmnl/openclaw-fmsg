@@ -58,10 +58,11 @@ describe("fmsg WebSocket and inbox catch-up", () => {
       onMessage: async (message) => {
         received.push(message.id);
         await state.markProcessed(message.id);
+        // Exercise shutdown while the catch-up queue is still unwinding.
+        if (received.length === 3) controller.abort();
       },
     });
     await until(() => received.length === 3);
-    controller.abort();
     await running;
     expect([...received].sort()).toEqual(["1", "2", "3"]);
     expect(new Set(received).size).toBe(3);

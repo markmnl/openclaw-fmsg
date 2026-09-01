@@ -1,0 +1,52 @@
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Node.js ${{ matrix.node-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ["22.22.3", "24.15.0", "25.9.0"]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Install OpenClaw peer for validation
+        run: |
+          npm install --prefix "$RUNNER_TEMP/openclaw-peer" --no-save --package-lock=false --ignore-scripts openclaw@2026.8.1
+          ln -s "$RUNNER_TEMP/openclaw-peer/node_modules/openclaw" node_modules/openclaw
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build precompiled JavaScript
+        run: npm run build
+
+      - name: Verify package contents
+        run: npm pack --dry-run --ignore-scripts

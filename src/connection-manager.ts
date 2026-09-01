@@ -16,6 +16,10 @@ export type FmsgConnectionOptions = {
 };
 
 function waitForOpen(socket: WebSocket, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) {
+    socket.close();
+    return Promise.reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
+  }
   return new Promise((resolve, reject) => {
     const cleanup = () => {
       socket.off("open", onOpen);
@@ -42,6 +46,10 @@ function waitForOpen(socket: WebSocket, signal: AbortSignal): Promise<void> {
 }
 
 function waitForClose(socket: WebSocket, signal: AbortSignal, rotateAfterMs: number): Promise<void> {
+  if (signal.aborted) {
+    socket.close();
+    return Promise.resolve();
+  }
   return new Promise((resolve) => {
     const timer = setTimeout(() => socket.close(1000, "token rotation"), Math.max(1000, rotateAfterMs));
     timer.unref?.();

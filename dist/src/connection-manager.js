@@ -3,6 +3,10 @@ import { normalizeFmsgMessage } from "./client.js";
 import { formatSafeError } from "./redact.js";
 import { compareMessageIds } from "./state.js";
 function waitForOpen(socket, signal) {
+    if (signal.aborted) {
+        socket.close();
+        return Promise.reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
+    }
     return new Promise((resolve, reject) => {
         const cleanup = () => {
             socket.off("open", onOpen);
@@ -28,6 +32,10 @@ function waitForOpen(socket, signal) {
     });
 }
 function waitForClose(socket, signal, rotateAfterMs) {
+    if (signal.aborted) {
+        socket.close();
+        return Promise.resolve();
+    }
     return new Promise((resolve) => {
         const timer = setTimeout(() => socket.close(1000, "token rotation"), Math.max(1000, rotateAfterMs));
         timer.unref?.();
