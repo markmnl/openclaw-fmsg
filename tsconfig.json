@@ -12,5 +12,5 @@
     "forceConsistentCasingInFileNames": true,
     "types": ["node"]
   },
-  "include": ["index.ts", "src/**/*.ts", "test/**/*.ts"]
+  "include": ["index.ts", "setup-entry.ts", "secret-contract-api.ts", "src/**/*.ts", "test/**/*.ts"]
 }

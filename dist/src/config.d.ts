@@ -1,13 +1,13 @@
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import type { ChannelPlugin } from "openclaw/plugin-sdk/channel-core";
-export declare const DEFAULT_API_URL = "https://api.fmsg.io";
+import { type SecretInput } from "openclaw/plugin-sdk/secret-input";
 export declare const DEFAULT_MAX_AGENT_TURNS = 8;
 export declare const DEFAULT_AGENT_TURN_WINDOW_MS = 60000;
 export declare const DEFAULT_MEDIA_MAX_BYTES: number;
 export type FmsgChannelConfig = {
     enabled?: boolean;
     apiUrl?: string;
-    apiKey?: string;
+    apiKey?: SecretInput;
     homeChannel?: string;
     allowedUsers?: string[];
     allowAllUsers?: boolean;
@@ -22,7 +22,7 @@ export type ResolvedFmsgAccount = {
     config: ResolvedFmsgConfig;
 };
 export type ResolvedFmsgConfig = {
-    apiUrl: string;
+    apiUrl?: string;
     apiKey?: string;
     homeChannel?: string;
     allowedUsers: string[];
@@ -30,6 +30,30 @@ export type ResolvedFmsgConfig = {
     maxAgentTurnsPerThread: number;
     agentTurnWindowMs: number;
     mediaMaxBytes: number;
+};
+export declare const secretInputJsonSchema: {
+    readonly oneOf: readonly [{
+        readonly type: "string";
+        readonly minLength: 1;
+    }, {
+        readonly type: "object";
+        readonly additionalProperties: false;
+        readonly required: readonly ["source", "provider", "id"];
+        readonly properties: {
+            readonly source: {
+                readonly type: "string";
+                readonly enum: readonly ["env", "file", "exec", "store"];
+            };
+            readonly provider: {
+                readonly type: "string";
+                readonly minLength: 1;
+            };
+            readonly id: {
+                readonly type: "string";
+                readonly minLength: 1;
+            };
+        };
+    }];
 };
 export declare const fmsgChannelJsonSchema: {
     readonly type: "object";
@@ -42,11 +66,33 @@ export declare const fmsgChannelJsonSchema: {
         readonly apiUrl: {
             readonly type: "string";
             readonly format: "uri";
-            readonly default: "https://api.fmsg.io";
+            readonly pattern: "^https?://";
+            readonly description: "Explicit fmsg Web API base URL; no hosted endpoint is assumed.";
         };
         readonly apiKey: {
-            readonly type: "string";
-            readonly pattern: "^fmsgk_";
+            readonly description: "fmsg API key or OpenClaw SecretRef. FMSG_API_KEY takes precedence.";
+            readonly oneOf: readonly [{
+                readonly type: "string";
+                readonly minLength: 1;
+            }, {
+                readonly type: "object";
+                readonly additionalProperties: false;
+                readonly required: readonly ["source", "provider", "id"];
+                readonly properties: {
+                    readonly source: {
+                        readonly type: "string";
+                        readonly enum: readonly ["env", "file", "exec", "store"];
+                    };
+                    readonly provider: {
+                        readonly type: "string";
+                        readonly minLength: 1;
+                    };
+                    readonly id: {
+                        readonly type: "string";
+                        readonly minLength: 1;
+                    };
+                };
+            }];
         };
         readonly homeChannel: {
             readonly type: "string";
@@ -84,6 +130,8 @@ export declare const fmsgChannelJsonSchema: {
     };
 };
 export declare const fmsgChannelConfigSchema: NonNullable<ChannelPlugin["configSchema"]>;
+export declare function rawFmsgConfig(cfg: OpenClawConfig): FmsgChannelConfig;
+export declare function normalizeFmsgApiUrl(value: string): string | undefined;
 export declare function normalizeFmsgAddress(value: string): string | undefined;
 export declare function resolveFmsgConfig(cfg: OpenClawConfig, env?: NodeJS.ProcessEnv): ResolvedFmsgConfig;
 export declare function resolveEffectiveAllowedUsers(config: ResolvedFmsgConfig): {
@@ -93,3 +141,6 @@ export declare function resolveEffectiveAllowedUsers(config: ResolvedFmsgConfig)
 export declare function isFmsgSenderAllowed(config: ResolvedFmsgConfig, sender: string): boolean;
 export declare function listFmsgAccountIds(cfg: OpenClawConfig): string[];
 export declare function resolveFmsgAccount(cfg: OpenClawConfig, accountId?: string | null): ResolvedFmsgAccount;
+export declare function hasConfiguredFmsgApiKey(cfg: OpenClawConfig, env?: NodeJS.ProcessEnv): boolean;
+export declare function hasConfiguredFmsgApiUrl(cfg: OpenClawConfig, env?: NodeJS.ProcessEnv): boolean;
+export declare function hasConfiguredFmsgHomeChannel(cfg: OpenClawConfig, env?: NodeJS.ProcessEnv): boolean;

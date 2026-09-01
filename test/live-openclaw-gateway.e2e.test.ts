@@ -1,6 +1,6 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -140,8 +140,19 @@ describe.skipIf(!enabled)("live OpenClaw gateway", () => {
     const workspace = path.join(temporary, "workspace");
     await mkdir(workspace, { recursive: true });
     const configPath = path.join(temporary, "openclaw.json");
+    const secretsPath = path.join(temporary, "secrets.json");
+    await writeFile(secretsPath, JSON.stringify({
+      fmsg: { apiKey: "fmsgk_agent-test" },
+      model: { apiKey: "test-model-key" },
+    }));
+    await chmod(secretsPath, 0o600);
     await writeFile(configPath, JSON.stringify({
       gateway: { mode: "local", bind: "loopback", auth: { mode: "none" } },
+      secrets: {
+        providers: {
+          "fmsg-test": { source: "file", path: secretsPath, mode: "json" },
+        },
+      },
       agents: {
         defaults: {
           workspace,
@@ -154,7 +165,7 @@ describe.skipIf(!enabled)("live OpenClaw gateway", () => {
         providers: {
           "fmsg-test": {
             baseUrl: `${model.url}/v1`,
-            apiKey: "test-model-key",
+            apiKey: { source: "file", provider: "fmsg-test", id: "/model/apiKey" },
             api: "openai-completions",
             models: [{
               id: "gateway-test",
@@ -178,7 +189,7 @@ describe.skipIf(!enabled)("live OpenClaw gateway", () => {
         fmsg: {
           enabled: true,
           apiUrl: fmsg.url,
-          apiKey: "fmsgk_agent-test",
+          apiKey: { source: "file", provider: "fmsg-test", id: "/fmsg/apiKey" },
           allowedUsers: ["@alice@example.net"],
           maxAgentTurnsPerThread: 8,
           agentTurnWindowMs: 60_000,
@@ -187,6 +198,24 @@ describe.skipIf(!enabled)("live OpenClaw gateway", () => {
     }, null, 2));
 
     const port = await unusedPort();
+    const {
+      FMSG_API_KEY: _ignoredFmsgApiKey,
+      FMSG_API_URL: _ignoredFmsgApiUrl,
+      FMSG_HOME_CHANNEL: _ignoredFmsgHomeChannel,
+      ...gatewayEnv
+    } = process.env;
+    const commandEnv = {
+      ...gatewayEnv,
+      OPENCLAW_CONFIG_PATH: configPath,
+      OPENCLAW_STATE_DIR: stateDir,
+      NO_COLOR: "1",
+    };
+    const audit = spawnSync(process.execPath, [cli, "secrets", "audit", "--check", "--json"], {
+      cwd: temporary,
+      env: commandEnv,
+      encoding: "utf8",
+    });
+    expect(audit.status, `${audit.stdout}\n${audit.stderr}`).toBe(0);
     const child = spawn(process.execPath, [
       cli,
       "gateway",
@@ -200,12 +229,7 @@ describe.skipIf(!enabled)("live OpenClaw gateway", () => {
       "--verbose",
     ], {
       cwd: temporary,
-      env: {
-        ...process.env,
-        OPENCLAW_CONFIG_PATH: configPath,
-        OPENCLAW_STATE_DIR: stateDir,
-        NO_COLOR: "1",
-      },
+      env: commandEnv,
       stdio: ["pipe", "pipe", "pipe"],
     });
     processes.push(child);

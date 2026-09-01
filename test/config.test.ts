@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  fmsgChannelConfigSchema,
   isFmsgSenderAllowed,
+  resolveFmsgAccount,
   resolveEffectiveAllowedUsers,
   resolveFmsgConfig,
 } from "../src/config.js";
@@ -55,5 +57,51 @@ describe("fmsg config", () => {
       {},
     );
     expect(isFmsgSenderAllowed(open, "@alice@example.net")).toBe(true);
+  });
+
+  it.each(["env", "file", "exec", "store"] as const)(
+    "accepts an OpenClaw %s SecretRef",
+    (source) => {
+      const result = fmsgChannelConfigSchema.runtime?.safeParse({
+        apiUrl: "https://fmsg-api.example.com",
+        apiKey: { source, provider: "default", id: "FMSG_API_KEY" },
+      });
+      expect(result?.success).toBe(true);
+    },
+  );
+
+  it("rejects malformed SecretRefs", () => {
+    const result = fmsgChannelConfigSchema.runtime?.safeParse({
+      apiUrl: "https://fmsg-api.example.com",
+      apiKey: { source: "unknown", provider: "default", id: "FMSG_API_KEY" },
+    });
+    expect(result?.success).toBe(false);
+  });
+
+  it("uses FMSG_API_KEY ahead of an unresolved configured SecretRef", () => {
+    const config = resolveFmsgConfig(
+      {
+        channels: {
+          fmsg: {
+            apiUrl: "https://fmsg-api.example.com",
+            apiKey: { source: "file", provider: "mounted-json", id: "/fmsg/apiKey" },
+          },
+        },
+      } as never,
+      { FMSG_API_KEY: "fmsgk_environment" },
+    );
+    expect(config.apiKey).toBe("fmsgk_environment");
+  });
+
+  it("requires an explicit API URL before the account is configured", () => {
+    const missing = resolveFmsgAccount({ channels: { fmsg: { apiKey: "fmsgk_test" } } } as never);
+    const configured = resolveFmsgAccount({
+      channels: {
+        fmsg: { apiUrl: "https://fmsg-api.example.com", apiKey: "fmsgk_test" },
+      },
+    } as never);
+    expect(missing.config.apiUrl).toBeUndefined();
+    expect(missing.configured).toBe(false);
+    expect(configured.configured).toBe(true);
   });
 });

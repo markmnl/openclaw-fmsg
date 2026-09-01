@@ -9,7 +9,7 @@ import { fmsgStatePath, registerActiveFmsgAccount } from "./service.js";
 import { FmsgStateStore } from "./state.js";
 export async function startFmsgGatewayAccount(ctx) {
     const account = ctx.account;
-    if (!account.configured || !account.config.apiKey) {
+    if (!account.configured || !account.config.apiUrl || !account.config.apiKey) {
         throw new Error(`fmsg channel is not configured for account "${account.accountId}"`);
     }
     ctx.setStatus({

@@ -35,22 +35,34 @@ Connect [OpenClaw](https://openclaw.ai) to [fmsg](https://fmsg.org), the federat
 
 ```bash
 openclaw plugins install npm:@markmnl/openclaw-fmsg
+openclaw channels add --channel fmsg
 ```
 
 The published package contains TypeScript source for linked development and prebuilt JavaScript for managed installs. It has no install-time build hook and is compatible with OpenClaw/npm dependency installation using `--ignore-scripts`.
 
-Set the API key in the gateway environment, then add `channels.fmsg` to `openclaw.json`:
+The setup flow prompts for your fmsg Web API URL, home fmsg address, and API key. No hosted API URL is assumed. For the credential, setup can store a plaintext key, use `FMSG_API_KEY`, or write an OpenClaw SecretRef.
+
+For environment-based configuration, expose all values to the Gateway process:
 
 ```bash
+export FMSG_API_URL='https://fmsg-api.example.com'
 export FMSG_API_KEY='fmsgk_...'
+export FMSG_HOME_CHANNEL='@owner@example.com'
 ```
+
+Alternatively, configure the channel explicitly:
 
 ```json
 {
   "channels": {
     "fmsg": {
       "enabled": true,
-      "apiUrl": "https://api.fmsg.io",
+      "apiUrl": "https://fmsg-api.example.com",
+      "apiKey": {
+        "source": "env",
+        "provider": "default",
+        "id": "FMSG_API_KEY"
+      },
       "homeChannel": "@owner@example.com",
       "allowedUsers": ["@owner@example.com"],
       "allowAllUsers": false,
@@ -69,15 +81,39 @@ fmsg connected
 
 The sender address is always read from the exchanged JWT's `sub` claim. `homeChannel` is not a from-address.
 
+### SecretRef credentials
+
+`channels.fmsg.apiKey` accepts OpenClaw `env`, `file`, `exec`, and `store` SecretRefs. OpenClaw keeps the reference in `openclaw.json`, resolves it into the active in-memory runtime snapshot, and includes this path in `openclaw secrets audit`, `configure`, and `apply`.
+
+An `env` SecretRef still requires the named variable in the Gateway environment. `file`, `exec`, and `store` references use the corresponding provider under OpenClaw's `secrets.providers` configuration and do not require `FMSG_API_KEY` to be injected into the Gateway environment.
+
+```json
+{
+  "channels": {
+    "fmsg": {
+      "apiUrl": "https://fmsg-api.example.com",
+      "apiKey": {
+        "source": "file",
+        "provider": "mounted-json",
+        "id": "/fmsg/apiKey"
+      },
+      "homeChannel": "@owner@example.com"
+    }
+  }
+}
+```
+
+When the legacy `FMSG_API_KEY` environment variable is present, it remains authoritative and a configured `apiKey` SecretRef is treated as inactive.
+
 ## Configuration
 
-Environment values take precedence over `channels.fmsg`.
+Environment values take precedence over `channels.fmsg`. `apiUrl` is required: the plugin does not assume a public or hosted fmsg deployment.
 
 | Configuration | Environment | Default | Purpose |
 |---|---|---:|---|
-| `apiUrl` | `FMSG_API_URL` | `https://api.fmsg.io` | fmsg Web API base URL |
-| `apiKey` | `FMSG_API_KEY` | — | `fmsgk_...` credential exchanged for short-lived JWTs |
-| `homeChannel` | `FMSG_HOME_CHANNEL` | — | Owner address and fallback sole allowlist entry |
+| `apiUrl` | `FMSG_API_URL` | required | Explicit fmsg Web API base URL |
+| `apiKey` | `FMSG_API_KEY` | required | `fmsgk_...` credential or OpenClaw SecretRef |
+| `homeChannel` | `FMSG_HOME_CHANNEL` | prompted by setup | Owner address and fallback sole allowlist entry |
 | `allowedUsers` | `FMSG_ALLOWED_USERS` | `[]` | Allowed inbound senders; environment form is comma-separated |
 | `allowAllUsers` | `FMSG_ALLOW_ALL_USERS` | `false` | Explicitly allow every valid fmsg sender |
 | `maxAgentTurnsPerThread` | `FMSG_MAX_AGENT_TURNS_PER_THREAD` | `8` | Automatic OpenClaw turns allowed per branch/window; `0` disables |

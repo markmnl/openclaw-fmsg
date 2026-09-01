@@ -1,8 +1,12 @@
 import { buildChannelOutboundSessionRoute, buildThreadAwareOutboundSessionRoute, createChatChannelPlugin, } from "openclaw/plugin-sdk/channel-core";
 import { createMessageReceiptFromOutboundResults, defineChannelMessageAdapter, } from "openclaw/plugin-sdk/channel-outbound";
 import { fmsgChannelConfigSchema, listFmsgAccountIds, normalizeFmsgAddress, resolveEffectiveAllowedUsers, resolveFmsgAccount, } from "./config.js";
-import { startFmsgGatewayAccount } from "./gateway.js";
-import { sendFmsgOutbound } from "./outbound.js";
+import { fmsgChannelSecrets } from "./secret-contract.js";
+import { fmsgSetupContract, fmsgSetupWizard } from "./setup.js";
+async function sendFmsgOutbound(params) {
+    const outbound = await import("./outbound.js");
+    return outbound.sendFmsgOutbound(params);
+}
 const CHANNEL_ID = "fmsg";
 function normalizeTarget(raw) {
     const normalized = normalizeFmsgAddress(raw.replace(/^fmsg:/iu, ""));
@@ -93,7 +97,7 @@ export const fmsgChannelPlugin = createChatChannelPlugin({
             id: CHANNEL_ID,
             label: "fmsg",
             selectionLabel: "fmsg (Federated Messaging)",
-            docsPath: "https://github.com/fmsg/openclaw-fmsg#readme",
+            docsPath: "https://github.com/markmnl/openclaw-fmsg#readme",
             docsLabel: "documentation",
             blurb: "Federated, threaded messaging over the fmsg Web API.",
             order: 75,
@@ -106,6 +110,9 @@ export const fmsgChannelPlugin = createChatChannelPlugin({
         },
         reload: { configPrefixes: ["channels.fmsg"] },
         configSchema: fmsgChannelConfigSchema,
+        setupContract: fmsgSetupContract,
+        setupWizard: fmsgSetupWizard,
+        secrets: fmsgChannelSecrets,
         config: {
             listAccountIds: listFmsgAccountIds,
             resolveAccount: (cfg, accountId) => resolveFmsgAccount(cfg, accountId),
@@ -165,7 +172,10 @@ export const fmsgChannelPlugin = createChatChannelPlugin({
         },
         message: messageAdapter,
         gateway: {
-            startAccount: startFmsgGatewayAccount,
+            startAccount: async (ctx) => {
+                const gateway = await import("./gateway.js");
+                return gateway.startFmsgGatewayAccount(ctx);
+            },
         },
     },
     security: {

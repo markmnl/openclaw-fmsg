@@ -14,7 +14,7 @@ export async function startFmsgGatewayAccount(
   ctx: ChannelGatewayContext<ResolvedFmsgAccount>,
 ): Promise<void> {
   const account = ctx.account;
-  if (!account.configured || !account.config.apiKey) {
+  if (!account.configured || !account.config.apiUrl || !account.config.apiKey) {
     throw new Error(`fmsg channel is not configured for account "${account.accountId}"`);
   }
   ctx.setStatus({

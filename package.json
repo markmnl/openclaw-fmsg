@@ -32,6 +32,8 @@
     "dist/**/*.js",
     "dist/**/*.d.ts",
     "index.ts",
+    "setup-entry.ts",
+    "secret-contract-api.ts",
     "src/**/*.ts",
     "openclaw.plugin.json",
     "README.md",
@@ -73,6 +75,8 @@
     "runtimeExtensions": [
       "./dist/index.js"
     ],
+    "setupEntry": "./setup-entry.ts",
+    "runtimeSetupEntry": "./dist/setup-entry.js",
     "channels": [
       "fmsg"
     ],
@@ -95,7 +99,45 @@
       "order": 75,
       "aliases": [
         "fmsg"
-      ]
+      ],
+      "configuredState": {
+        "env": {
+          "allOf": [
+            "FMSG_API_URL",
+            "FMSG_API_KEY",
+            "FMSG_HOME_CHANNEL"
+          ]
+        }
+      },
+      "setup": {
+        "fields": [
+          {
+            "key": "apiUrl",
+            "kind": "string",
+            "cli": {
+              "flags": "--api-url <url>",
+              "description": "fmsg Web API base URL"
+            }
+          },
+          {
+            "key": "apiKey",
+            "kind": "string",
+            "sensitive": true,
+            "cli": {
+              "flags": "--api-key <key>",
+              "description": "fmsg API key"
+            }
+          },
+          {
+            "key": "homeChannel",
+            "kind": "string",
+            "cli": {
+              "flags": "--home-channel <address>",
+              "description": "Home fmsg @user@domain address"
+            }
+          }
+        ]
+      }
     },
     "install": {
       "minHostVersion": ">=2026.8.1",
