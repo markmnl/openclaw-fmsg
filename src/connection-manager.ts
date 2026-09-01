@@ -86,6 +86,22 @@ function waitBackoff(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
+function closeAndWait(socket: WebSocket): Promise<void> {
+  if (socket.readyState === WebSocket.CLOSED) return Promise.resolve();
+  return new Promise((resolve) => {
+    const forceTimer = setTimeout(() => socket.terminate(), 1000);
+    forceTimer.unref?.();
+    const done = () => {
+      clearTimeout(forceTimer);
+      socket.off("close", done);
+      resolve();
+    };
+    socket.once("close", done);
+    if (socket.readyState === WebSocket.CLOSED) return done();
+    if (socket.readyState !== WebSocket.CLOSING) socket.close();
+  });
+}
+
 async function catchUp(options: FmsgConnectionOptions, enqueue: (message: FmsgMessage) => Promise<void>): Promise<void> {
   const collected: FmsgMessage[] = [];
   let offset = 0;
@@ -108,11 +124,11 @@ export async function runFmsgConnection(options: FmsgConnectionOptions): Promise
   let attempt = 0;
   while (!options.signal.aborted) {
     let socket: WebSocket | undefined;
+    let queue = Promise.resolve();
     const connectedAt = Date.now();
     try {
       const opened = await options.client.openWebSocket();
       socket = opened.socket;
-      let queue = Promise.resolve();
       const enqueue = (message: FmsgMessage) => {
         // Keep later messages flowing even when one delivery fails. The caller
         // still receives the individual rejection for logging/retry handling.
@@ -145,7 +161,8 @@ export async function runFmsgConnection(options: FmsgConnectionOptions): Promise
       if (options.signal.aborted) break;
       options.log?.warn?.(`fmsg connection failed: ${formatSafeError(error)}`);
     } finally {
-      if (socket && socket.readyState === WebSocket.OPEN) socket.close();
+      if (socket) await closeAndWait(socket);
+      await queue.catch(() => undefined);
     }
     if (options.signal.aborted) break;
     const ceiling = Math.min(60_000, 1000 * 2 ** Math.min(attempt++, 6));
