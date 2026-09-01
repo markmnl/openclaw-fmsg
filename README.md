@@ -1,10 +1,37 @@
 # @markmnl/openclaw-fmsg
 
-An [OpenClaw](https://openclaw.ai) channel plugin for [fmsg](https://fmsg.org), the federated messaging protocol. It receives messages through the fmsg Web API WebSocket, catches up from the inbox after reconnects, preserves fmsg's message-tree semantics as native OpenClaw sessions, and maps attachments in both directions.
+[![Tests](https://github.com/fmsg/openclaw-fmsg/actions/workflows/tests.yml/badge.svg)](https://github.com/fmsg/openclaw-fmsg/actions/workflows/tests.yml)
+[![OpenClaw](https://img.shields.io/badge/OpenClaw-%E2%89%A52026.8.1-e11d48)](https://openclaw.ai)
+[![Node.js](https://img.shields.io/badge/Node.js-22%20%7C%2024%20%7C%2025-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 
-Requires OpenClaw 2026.8.1 or newer and a Node.js release supported by that version (22.22.3+, 24.15+, or 25.9+ in the verified release lines).
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/fmsg/openclaw-fmsg/main/docs/OpenClaw-fmsg.png">
+  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/fmsg/openclaw-fmsg/main/docs/OpenClaw-fmsg-light.png">
+  <img alt="OpenClaw connected to fmsg" src="https://raw.githubusercontent.com/fmsg/openclaw-fmsg/main/docs/OpenClaw-fmsg-light.png" width="100%">
+</picture>
 
-## Install
+Connect [OpenClaw](https://openclaw.ai) to [fmsg](https://fmsg.org), the federated messaging protocol. The plugin receives messages over WebSocket, catches up after reconnects, preserves fmsg message trees as native OpenClaw sessions, and carries attachments in both directions.
+
+## Highlights
+
+- Native threaded sessions: roots start sessions, linear replies continue them, and sibling branches fork with direct ancestry as context.
+- Reliable delivery: WebSocket push, inbox catch-up, deduplication, JWT refresh, and reconnect backoff.
+- Safe by default: deny-by-default inbound access, `no_reply` enforcement, loop protection, and outbound credential redaction.
+- Full conversations: reply-all participant handling, attachment transfer, and chained replies within an agent turn.
+- Proactive messaging: the bundled `fmsg_send` tool can continue a one-to-one thread or start a new root.
+
+## Compatibility
+
+| Component | Supported |
+|---|---|
+| OpenClaw | `2026.8.1` or newer |
+| Node.js 22 | `22.22.3` or newer |
+| Node.js 24 | `24.15.0` or newer |
+| Node.js 25 | `25.9.0` or newer |
+| Package format | TypeScript source plus prebuilt ESM JavaScript |
+
+## Quick start
 
 ```bash
 openclaw plugins install @markmnl/openclaw-fmsg
@@ -153,10 +180,6 @@ npm run test:e2e
 ```
 
 The addresses are derived from the JWTs. The test sends a root with an attachment, observes WebSocket delivery, downloads the attachment, replies through the second deployment, and verifies the reply's `pid`.
-
-## Design provenance
-
-Thread semantics are ported from [hermes-fmsg](https://github.com/markmnl/hermes-fmsg). The connection/gateway separation follows the structure of the [DingTalk OpenClaw channel](https://github.com/soimy/openclaw-channel-dingtalk), adapted to the current focused OpenClaw 2026.8.1 SDK entrypoints. See [PLAN.md](./PLAN.md) for the verified endpoints, pinned revisions, conflicts, and design reasoning.
 
 ## License
 
