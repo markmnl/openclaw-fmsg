@@ -1,6 +1,6 @@
-# @markmnl/openclaw-fmsg
+# OpenClaw-fmsg
 
-[![Tests](https://github.com/fmsg/openclaw-fmsg/actions/workflows/tests.yml/badge.svg)](https://github.com/fmsg/openclaw-fmsg/actions/workflows/tests.yml)
+[![Tests](https://github.com/markmnl/openclaw-fmsg/actions/workflows/tests.yml/badge.svg)](https://github.com/markmnl/openclaw-fmsg/actions/workflows/tests.yml)
 [![OpenClaw](https://img.shields.io/badge/OpenClaw-%E2%89%A52026.8.1-e11d48)](https://openclaw.ai)
 [![Node.js](https://img.shields.io/badge/Node.js-22%20%7C%2024%20%7C%2025-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
