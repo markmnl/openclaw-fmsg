@@ -6,9 +6,9 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/fmsg/openclaw-fmsg/main/docs/OpenClaw-fmsg.png">
-  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/fmsg/openclaw-fmsg/main/docs/OpenClaw-fmsg-light.png">
-  <img alt="OpenClaw connected to fmsg" src="https://raw.githubusercontent.com/fmsg/openclaw-fmsg/main/docs/OpenClaw-fmsg-light.png" width="100%">
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/OpenClaw-fmsg.png">
+  <source media="(prefers-color-scheme: light)" srcset="./docs/OpenClaw-fmsg-light.png">
+  <img alt="OpenClaw connected to fmsg" src="./docs/OpenClaw-fmsg-light.png" width="100%">
 </picture>
 
 Connect [OpenClaw](https://openclaw.ai) to [fmsg](https://fmsg.org), the federated messaging protocol. The plugin receives messages over WebSocket, catches up after reconnects, preserves fmsg message trees as native OpenClaw sessions, and carries attachments in both directions.
