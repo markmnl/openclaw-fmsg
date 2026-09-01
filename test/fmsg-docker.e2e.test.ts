@@ -18,22 +18,42 @@ async function waitForOpen(socket: WebSocket): Promise<void> {
   });
 }
 
-async function nextNewMessage(socket: WebSocket, timeoutMs = 30_000): Promise<FmsgMessage> {
+async function nextNewMessage(
+  socket: WebSocket,
+  predicate: (message: FmsgMessage) => boolean,
+  timeoutMs = 30_000,
+): Promise<FmsgMessage> {
   return await new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("timed out waiting for fmsg WebSocket message")), timeoutMs);
     socket.on("message", function onMessage(raw) {
       try {
-        const event = JSON.parse(raw.toString()) as { type?: string; data?: unknown };
-        if (event.type !== "new_msg") return;
+        const event = FmsgClient.parseWsEvent(raw);
+        if (event?.type !== "new_msg") return;
+        const message = normalizeFmsgMessage(event.data);
+        if (!predicate(message)) return;
         clearTimeout(timer);
         socket.off("message", onMessage);
-        resolve(normalizeFmsgMessage(event.data));
+        resolve(message);
       } catch (error) {
         clearTimeout(timer);
         reject(error);
       }
     });
   });
+}
+
+async function waitForInboxMessage(
+  client: FmsgClient,
+  id: string,
+  timeoutMs = 30_000,
+): Promise<FmsgMessage> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const message = (await client.listInbox(100)).find((candidate) => candidate.id === id);
+    if (message) return message;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  throw new Error(`timed out waiting for fmsg inbox message ${id}`);
 }
 
 describe.skipIf(!enabled)("fmsg-docker e2e", () => {
@@ -55,10 +75,14 @@ describe.skipIf(!enabled)("fmsg-docker e2e", () => {
       await waitForOpen(peerSubscription.socket);
       try {
         const nonce = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-        const pushed = nextNewMessage(peerSubscription.socket);
+        const topic = `openclaw-fmsg-e2e-${nonce}`;
+        const pushed = nextNewMessage(
+          peerSubscription.socket,
+          (message) => message.topic === topic,
+        );
         const root = await agent.sendMessage({
           to: [peerToken.sender],
-          topic: `openclaw-fmsg-e2e-${nonce}`,
+          topic,
           text: `root-${nonce}`,
           attachments: [
             {
@@ -81,9 +105,8 @@ describe.skipIf(!enabled)("fmsg-docker e2e", () => {
           pid: received.id,
           text: `reply-${nonce}`,
         });
-        const agentInbox = await agent.listInbox(100);
-        const receivedReply = agentInbox.find((message) => message.id === reply.id);
-        expect(receivedReply?.pid).toBe(received.id);
+        const receivedReply = await waitForInboxMessage(agent, reply.id);
+        expect(receivedReply.pid).toBe(received.id);
       } finally {
         peerSubscription.socket.close();
       }
