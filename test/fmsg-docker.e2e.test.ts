@@ -44,16 +44,17 @@ async function nextNewMessage(
 
 async function waitForInboxMessage(
   client: FmsgClient,
-  id: string,
+  predicate: (message: FmsgMessage) => boolean,
+  description: string,
   timeoutMs = 30_000,
 ): Promise<FmsgMessage> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const message = (await client.listInbox(100)).find((candidate) => candidate.id === id);
+    const message = (await client.listInbox(100)).find(predicate);
     if (message) return message;
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
-  throw new Error(`timed out waiting for fmsg inbox message ${id}`);
+  throw new Error(`timed out waiting for fmsg inbox ${description}`);
 }
 
 describe.skipIf(!enabled)("fmsg-docker e2e", () => {
@@ -93,20 +94,25 @@ describe.skipIf(!enabled)("fmsg-docker e2e", () => {
           ],
         });
         const received = await pushed;
-        expect(received.id).toBe(root.id);
+        expect(received.topic).toBe(topic);
         expect(await peer.getMessageText(received)).toBe(`root-${nonce}`);
         const attachment = received.attachments?.[0];
         expect(attachment).toBeTruthy();
         const downloaded = await peer.downloadAttachment(received.id, attachment!.filename, 1_000_000);
         expect(Buffer.from(downloaded.data).toString()).toBe(`attachment-${nonce}`);
 
-        const reply = await peer.sendMessage({
+        await peer.sendMessage({
           to: [agentToken.sender],
           pid: received.id,
           text: `reply-${nonce}`,
         });
-        const receivedReply = await waitForInboxMessage(agent, reply.id);
-        expect(receivedReply.pid).toBe(received.id);
+        const receivedReply = await waitForInboxMessage(
+          agent,
+          (message) => message.pid === root.id,
+          `reply to ${root.id}`,
+        );
+        expect(receivedReply.pid).toBe(root.id);
+        expect(await agent.getMessageText(receivedReply)).toBe(`reply-${nonce}`);
       } finally {
         peerSubscription.socket.close();
       }
