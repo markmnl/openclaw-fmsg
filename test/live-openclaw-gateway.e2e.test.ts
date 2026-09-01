@@ -194,6 +194,8 @@ describe.skipIf(!enabled)("live OpenClaw gateway", () => {
           homeChannel: "@alice@example.net",
           allowedUsers: ["@alice@example.net"],
           maxAgentTurnsPerThread: 8,
+          maxAgentTurnsPerRoot: 20,
+          maxAgentTurnsPerSender: 20,
           agentTurnWindowMs: 60_000,
         },
       },

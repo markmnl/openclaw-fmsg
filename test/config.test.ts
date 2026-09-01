@@ -24,6 +24,8 @@ describe("fmsg config", () => {
         FMSG_API_KEY: "fmsgk_environment",
         FMSG_ALLOWED_USERS: "@Alice@Example.NET,@bob@example.org",
         FMSG_MAX_AGENT_TURNS_PER_THREAD: "12",
+        FMSG_MAX_AGENT_TURNS_PER_ROOT: "24",
+        FMSG_MAX_AGENT_TURNS_PER_SENDER: "36",
         FMSG_AGENT_TURN_WINDOW_MS: "90000",
       },
     );
@@ -32,6 +34,8 @@ describe("fmsg config", () => {
       apiKey: "fmsgk_environment",
       allowedUsers: ["@alice@example.net", "@bob@example.org"],
       maxAgentTurnsPerThread: 12,
+      maxAgentTurnsPerRoot: 24,
+      maxAgentTurnsPerSender: 36,
       agentTurnWindowMs: 90000,
     });
   });

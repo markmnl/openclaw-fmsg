@@ -2,6 +2,8 @@ import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import type { ChannelPlugin } from "openclaw/plugin-sdk/channel-core";
 import { type SecretInput } from "openclaw/plugin-sdk/secret-input";
 export declare const DEFAULT_MAX_AGENT_TURNS = 8;
+export declare const DEFAULT_MAX_AGENT_TURNS_PER_ROOT = 20;
+export declare const DEFAULT_MAX_AGENT_TURNS_PER_SENDER = 20;
 export declare const DEFAULT_AGENT_TURN_WINDOW_MS = 60000;
 export declare const DEFAULT_MEDIA_MAX_BYTES: number;
 export type FmsgChannelConfig = {
@@ -12,6 +14,8 @@ export type FmsgChannelConfig = {
     allowedUsers?: string[];
     allowAllUsers?: boolean;
     maxAgentTurnsPerThread?: number;
+    maxAgentTurnsPerRoot?: number;
+    maxAgentTurnsPerSender?: number;
     agentTurnWindowMs?: number;
     mediaMaxBytes?: number;
 };
@@ -28,6 +32,8 @@ export type ResolvedFmsgConfig = {
     allowedUsers: string[];
     allowAllUsers: boolean;
     maxAgentTurnsPerThread: number;
+    maxAgentTurnsPerRoot: number;
+    maxAgentTurnsPerSender: number;
     agentTurnWindowMs: number;
     mediaMaxBytes: number;
 };
@@ -116,11 +122,23 @@ export declare const fmsgChannelJsonSchema: {
             readonly default: 8;
             readonly description: "Automatic OpenClaw turns allowed per fmsg branch/window; 0 disables the circuit breaker.";
         };
+        readonly maxAgentTurnsPerRoot: {
+            readonly type: "integer";
+            readonly minimum: 0;
+            readonly default: 20;
+            readonly description: "Automatic OpenClaw turns allowed across all branches of one fmsg root/window; 0 disables this circuit breaker.";
+        };
+        readonly maxAgentTurnsPerSender: {
+            readonly type: "integer";
+            readonly minimum: 0;
+            readonly default: 20;
+            readonly description: "Automatic OpenClaw turns allowed for one normalized fmsg sender/window across all roots; 0 disables this circuit breaker.";
+        };
         readonly agentTurnWindowMs: {
             readonly type: "integer";
             readonly minimum: 1;
             readonly default: 60000;
-            readonly description: "Sliding per-branch automatic-turn window in milliseconds.";
+            readonly description: "Sliding automatic-turn window in milliseconds shared by branch, root, and sender circuit breakers.";
         };
         readonly mediaMaxBytes: {
             readonly type: "integer";

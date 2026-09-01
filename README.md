@@ -67,6 +67,8 @@ Alternatively, configure the channel explicitly:
       "allowedUsers": ["@owner@example.com"],
       "allowAllUsers": false,
       "maxAgentTurnsPerThread": 8,
+      "maxAgentTurnsPerRoot": 20,
+      "maxAgentTurnsPerSender": 20,
       "agentTurnWindowMs": 60000
     }
   }
@@ -117,7 +119,9 @@ Environment values take precedence over `channels.fmsg`. `apiUrl` is required: t
 | `allowedUsers` | `FMSG_ALLOWED_USERS` | `[]` | Allowed inbound senders; environment form is comma-separated |
 | `allowAllUsers` | `FMSG_ALLOW_ALL_USERS` | `false` | Explicitly allow every valid fmsg sender |
 | `maxAgentTurnsPerThread` | `FMSG_MAX_AGENT_TURNS_PER_THREAD` | `8` | Automatic OpenClaw turns allowed per branch/window; `0` disables |
-| `agentTurnWindowMs` | `FMSG_AGENT_TURN_WINDOW_MS` | `60000` | Sliding circuit-breaker window in milliseconds |
+| `maxAgentTurnsPerRoot` | `FMSG_MAX_AGENT_TURNS_PER_ROOT` | `20` | Automatic OpenClaw turns across every branch of one root/window; `0` disables |
+| `maxAgentTurnsPerSender` | `FMSG_MAX_AGENT_TURNS_PER_SENDER` | `20` | Automatic OpenClaw turns from one normalized sender across all roots/window; `0` disables |
+| `agentTurnWindowMs` | `FMSG_AGENT_TURN_WINDOW_MS` | `60000` | Sliding window shared by all three circuit breakers |
 | `mediaMaxBytes` | — | `10485760` | Maximum bytes per inbound/outbound attachment |
 
 Access is default-deny:
@@ -219,10 +223,11 @@ By default it continues the latest strict one-to-one thread. Set `fmsg_new_threa
 
 ## Safety behavior
 
-- `no_reply` inbound messages are recorded and marked read without starting an automatic agent turn.
-- `important` is exposed as `FmsgImportant` in OpenClaw's inbound context. `no_reply` is retained in the fmsg routing record and audit log, then hard-suppressed before model dispatch.
-- The loop circuit breaker counts one successful automatic OpenClaw turn, not individual chunks. Inbound messages do not reset it. On the final allowed turn, outbound messages carry `no_reply`; further turns are suppressed until timestamps leave the sliding window.
-- Operators can tune both circuit-breaker values or set `maxAgentTurnsPerThread: 0` to rely entirely on agent discretion.
+- `no_reply` inbound messages are marked read without ancestry fetching or an automatic agent turn.
+- `important` is exposed as `FmsgImportant` in OpenClaw's inbound context. `no_reply` is hard-suppressed before model dispatch.
+- The loop circuit breakers count one successful automatic OpenClaw turn, not individual chunks, against the branch, root, and normalized sender. Inbound messages do not reset them. On the final allowed turn for any enabled budget, outbound messages carry `no_reply`; further turns are suppressed until timestamps leave the shared sliding window.
+- Operators can tune each budget independently. Setting `maxAgentTurnsPerThread`, `maxAgentTurnsPerRoot`, or `maxAgentTurnsPerSender` to `0` disables that scope's breaker.
+- Suppression warnings identify the exhausted scope, key, sender, and budget, and are rate-limited to one warning per scope/window.
 - Inbound bodies, ancestry, topics, addresses, and filenames are untrusted.
 - `fmsgk_...` and compact JWT-shaped strings are redacted immediately before any outbound text is drafted and from plugin error logs.
 - `senderIsOwner` is derived from `commands.ownerAllowFrom`, not ordinary channel access. `senderKind` remains unknown unless fmsg eventually supplies authenticated human/agent metadata; the plugin does not guess from addresses.

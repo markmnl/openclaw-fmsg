@@ -11,6 +11,8 @@ const EMPTY_STATE = {
     lastInboundByBranch: {},
     lastOutboundByBranch: {},
     turnTimestampsByBranch: {},
+    turnTimestampsByRoot: {},
+    turnTimestampsBySender: {},
     lastDirectByAddress: {},
 };
 function cloneEmptyState() {
@@ -40,6 +42,8 @@ export class FmsgStateStore {
                     lastInboundByBranch: parsed.lastInboundByBranch ?? {},
                     lastOutboundByBranch: parsed.lastOutboundByBranch ?? {},
                     turnTimestampsByBranch: parsed.turnTimestampsByBranch ?? {},
+                    turnTimestampsByRoot: parsed.turnTimestampsByRoot ?? {},
+                    turnTimestampsBySender: parsed.turnTimestampsBySender ?? {},
                     lastDirectByAddress: parsed.lastDirectByAddress ?? {},
                 };
             }
@@ -178,21 +182,36 @@ export class FmsgStateStore {
         await this.persist();
         return assignment;
     }
-    inspectTurnWindow(branchId, maxTurns, windowMs, now = Date.now()) {
+    inspectTimestamps(timestampsByKey, key, maxTurns, windowMs, now) {
         if (maxTurns === 0)
             return { suppressed: false, lastAllowed: false, count: 0 };
-        const timestamps = (this.state.turnTimestampsByBranch[branchId] ?? []).filter((timestamp) => timestamp > now - windowMs && timestamp <= now);
-        this.state.turnTimestampsByBranch[branchId] = timestamps;
+        const timestamps = (timestampsByKey[key] ?? []).filter((timestamp) => timestamp > now - windowMs && timestamp <= now);
+        timestampsByKey[key] = timestamps;
         return {
             suppressed: timestamps.length >= maxTurns,
             lastAllowed: timestamps.length === maxTurns - 1,
             count: timestamps.length,
         };
     }
-    async recordAutomaticTurn(branchId, windowMs, now = Date.now()) {
-        const timestamps = (this.state.turnTimestampsByBranch[branchId] ?? []).filter((timestamp) => timestamp > now - windowMs && timestamp <= now);
+    inspectTurnWindow(branchId, maxTurns, windowMs, now = Date.now()) {
+        return this.inspectTimestamps(this.state.turnTimestampsByBranch, branchId, maxTurns, windowMs, now);
+    }
+    inspectRootTurnWindow(rootId, maxTurns, windowMs, now = Date.now()) {
+        return this.inspectTimestamps(this.state.turnTimestampsByRoot, rootId, maxTurns, windowMs, now);
+    }
+    inspectSenderTurnWindow(sender, maxTurns, windowMs, now = Date.now()) {
+        return this.inspectTimestamps(this.state.turnTimestampsBySender, sender.toLowerCase(), maxTurns, windowMs, now);
+    }
+    recordTimestamp(timestampsByKey, key, windowMs, now) {
+        const timestamps = (timestampsByKey[key] ?? []).filter((timestamp) => timestamp > now - windowMs && timestamp <= now);
         timestamps.push(now);
-        this.state.turnTimestampsByBranch[branchId] = timestamps;
+        timestampsByKey[key] = timestamps;
+    }
+    async recordAutomaticTurn(params) {
+        const now = params.now ?? Date.now();
+        this.recordTimestamp(this.state.turnTimestampsByBranch, params.branchId, params.windowMs, now);
+        this.recordTimestamp(this.state.turnTimestampsByRoot, params.rootId, params.windowMs, now);
+        this.recordTimestamp(this.state.turnTimestampsBySender, params.sender.toLowerCase(), params.windowMs, now);
         await this.persist();
     }
     pruneMessages() {

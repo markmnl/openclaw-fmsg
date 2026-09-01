@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -74,11 +74,37 @@ describe("thread mapping and state", () => {
       const check = state.inspectTurnWindow("100", 8, 60_000, index * 1000);
       expect(check.suppressed).toBe(false);
       expect(check.lastAllowed).toBe(index === 7);
-      await state.recordAutomaticTurn("100", 60_000, index * 1000);
+      await state.recordAutomaticTurn({
+        branchId: "100",
+        rootId: "100",
+        sender: "@alice@example.net",
+        windowMs: 60_000,
+        now: index * 1000,
+      });
     }
     expect(state.inspectTurnWindow("100", 8, 60_000, 8_000).suppressed).toBe(true);
     expect(state.inspectTurnWindow("100", 8, 60_000, 61_000).suppressed).toBe(false);
     expect(state.inspectTurnWindow("100", 0, 60_000, 8_000).suppressed).toBe(false);
+  });
+
+  it("loads v0.2.1 state without root or sender turn windows", async () => {
+    const legacyPath = path.join(directory, "legacy-state.json");
+    await writeFile(legacyPath, JSON.stringify({
+      version: 1,
+      messages: {},
+      children: {},
+      processed: [],
+      pendingInbound: [],
+      lastInboundByBranch: {},
+      lastOutboundByBranch: {},
+      turnTimestampsByBranch: { "100": [1_000] },
+      lastDirectByAddress: {},
+    }));
+    const legacy = new FmsgStateStore(legacyPath);
+    await legacy.load();
+    expect(legacy.inspectTurnWindow("100", 8, 60_000, 2_000).count).toBe(1);
+    expect(legacy.inspectRootTurnWindow("100", 20, 60_000, 2_000).count).toBe(0);
+    expect(legacy.inspectSenderTurnWindow("@alice@example.net", 20, 60_000, 2_000).count).toBe(0);
   });
 
   it("persists branch assignments and processed IDs", async () => {

@@ -13,6 +13,8 @@ type PersistedState = {
   lastInboundByBranch: Record<string, string>;
   lastOutboundByBranch: Record<string, string>;
   turnTimestampsByBranch: Record<string, number[]>;
+  turnTimestampsByRoot: Record<string, number[]>;
+  turnTimestampsBySender: Record<string, number[]>;
   lastDirectByAddress: Record<string, string>;
   highWaterId?: string;
 };
@@ -26,6 +28,8 @@ const EMPTY_STATE: PersistedState = {
   lastInboundByBranch: {},
   lastOutboundByBranch: {},
   turnTimestampsByBranch: {},
+  turnTimestampsByRoot: {},
+  turnTimestampsBySender: {},
   lastDirectByAddress: {},
 };
 
@@ -55,6 +59,8 @@ export class FmsgStateStore {
           lastInboundByBranch: parsed.lastInboundByBranch ?? {},
           lastOutboundByBranch: parsed.lastOutboundByBranch ?? {},
           turnTimestampsByBranch: parsed.turnTimestampsByBranch ?? {},
+          turnTimestampsByRoot: parsed.turnTimestampsByRoot ?? {},
+          turnTimestampsBySender: parsed.turnTimestampsBySender ?? {},
           lastDirectByAddress: parsed.lastDirectByAddress ?? {},
         };
       }
@@ -210,16 +216,22 @@ export class FmsgStateStore {
     return assignment;
   }
 
-  inspectTurnWindow(branchId: string, maxTurns: number, windowMs: number, now = Date.now()): {
+  private inspectTimestamps(
+    timestampsByKey: Record<string, number[]>,
+    key: string,
+    maxTurns: number,
+    windowMs: number,
+    now: number,
+  ): {
     suppressed: boolean;
     lastAllowed: boolean;
     count: number;
   } {
     if (maxTurns === 0) return { suppressed: false, lastAllowed: false, count: 0 };
-    const timestamps = (this.state.turnTimestampsByBranch[branchId] ?? []).filter(
+    const timestamps = (timestampsByKey[key] ?? []).filter(
       (timestamp) => timestamp > now - windowMs && timestamp <= now,
     );
-    this.state.turnTimestampsByBranch[branchId] = timestamps;
+    timestampsByKey[key] = timestamps;
     return {
       suppressed: timestamps.length >= maxTurns,
       lastAllowed: timestamps.length === maxTurns - 1,
@@ -227,12 +239,65 @@ export class FmsgStateStore {
     };
   }
 
-  async recordAutomaticTurn(branchId: string, windowMs: number, now = Date.now()): Promise<void> {
-    const timestamps = (this.state.turnTimestampsByBranch[branchId] ?? []).filter(
+  inspectTurnWindow(branchId: string, maxTurns: number, windowMs: number, now = Date.now()) {
+    return this.inspectTimestamps(
+      this.state.turnTimestampsByBranch,
+      branchId,
+      maxTurns,
+      windowMs,
+      now,
+    );
+  }
+
+  inspectRootTurnWindow(rootId: string, maxTurns: number, windowMs: number, now = Date.now()) {
+    return this.inspectTimestamps(
+      this.state.turnTimestampsByRoot,
+      rootId,
+      maxTurns,
+      windowMs,
+      now,
+    );
+  }
+
+  inspectSenderTurnWindow(sender: string, maxTurns: number, windowMs: number, now = Date.now()) {
+    return this.inspectTimestamps(
+      this.state.turnTimestampsBySender,
+      sender.toLowerCase(),
+      maxTurns,
+      windowMs,
+      now,
+    );
+  }
+
+  private recordTimestamp(
+    timestampsByKey: Record<string, number[]>,
+    key: string,
+    windowMs: number,
+    now: number,
+  ): void {
+    const timestamps = (timestampsByKey[key] ?? []).filter(
       (timestamp) => timestamp > now - windowMs && timestamp <= now,
     );
     timestamps.push(now);
-    this.state.turnTimestampsByBranch[branchId] = timestamps;
+    timestampsByKey[key] = timestamps;
+  }
+
+  async recordAutomaticTurn(params: {
+    branchId: string;
+    rootId: string;
+    sender: string;
+    windowMs: number;
+    now?: number;
+  }): Promise<void> {
+    const now = params.now ?? Date.now();
+    this.recordTimestamp(this.state.turnTimestampsByBranch, params.branchId, params.windowMs, now);
+    this.recordTimestamp(this.state.turnTimestampsByRoot, params.rootId, params.windowMs, now);
+    this.recordTimestamp(
+      this.state.turnTimestampsBySender,
+      params.sender.toLowerCase(),
+      params.windowMs,
+      now,
+    );
     await this.persist();
   }
 

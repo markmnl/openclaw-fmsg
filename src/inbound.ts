@@ -18,6 +18,38 @@ import type { ActiveFmsgAccount } from "./service.js";
 import { buildAncestryContext, isStrictDmWith, participantsFromMessage } from "./threading.js";
 import type { FmsgMessage } from "./types.js";
 
+type TurnWindow = {
+  scope: "branch" | "root" | "sender";
+  key: string;
+  budget: number;
+  suppressed: boolean;
+  lastAllowed: boolean;
+};
+
+const suppressionWarnings = new WeakMap<object, Map<string, number>>();
+
+function warnSuppressionOnce(
+  service: ActiveFmsgAccount,
+  window: TurnWindow,
+  sender: string,
+  windowMs: number,
+): void {
+  const now = Date.now();
+  let warnings = suppressionWarnings.get(service.state);
+  if (!warnings) {
+    warnings = new Map();
+    suppressionWarnings.set(service.state, warnings);
+  }
+  const warningKey = `${window.scope}:${window.key}`;
+  const previous = warnings.get(warningKey);
+  if (previous !== undefined && previous > now - windowMs) return;
+  warnings.set(warningKey, now);
+  service.log?.warn?.(
+    `fmsg automatic reply suppressed: scope=${window.scope} key=${window.key} sender=${sender} ` +
+      `budget=${window.budget} turns in ${windowMs}ms`,
+  );
+}
+
 function timestampMs(value: string | number | undefined): number {
   if (typeof value === "number") return value < 10_000_000_000 ? value * 1000 : value;
   const parsed = Date.parse(value ?? "");
@@ -84,6 +116,28 @@ export async function handleFmsgInbound(params: {
     return;
   }
 
+  if (message.no_reply) {
+    service.log?.info?.(`fmsg no_reply honored for message ${message.id}`);
+    await finishWithoutReply(service, message);
+    return;
+  }
+
+  const senderWindow = service.state.inspectSenderTurnWindow(
+    sender,
+    service.config.maxAgentTurnsPerSender,
+    service.config.agentTurnWindowMs,
+  );
+  if (senderWindow.suppressed) {
+    warnSuppressionOnce(service, {
+      scope: "sender",
+      key: sender,
+      budget: service.config.maxAgentTurnsPerSender,
+      ...senderWindow,
+    }, sender, service.config.agentTurnWindowMs);
+    await finishWithoutReply(service, message);
+    return;
+  }
+
   const ancestry = await buildAncestryContext({ leaf: message, client: service.client });
   for (const ancestor of ancestry.messages.slice(0, -1)) service.state.assignMessage(ancestor);
   const assignment = service.state.assignMessage(message, { inbound: true });
@@ -94,25 +148,43 @@ export async function handleFmsgInbound(params: {
   }
   await service.state.persist();
 
-  if (message.no_reply) {
-    service.log?.info?.(`fmsg no_reply honored for message ${message.id}`);
-    await finishWithoutReply(service, message);
-    return;
-  }
-
-  const turnWindow = service.state.inspectTurnWindow(
+  const branchWindow = service.state.inspectTurnWindow(
     assignment.branchId,
     service.config.maxAgentTurnsPerThread,
     service.config.agentTurnWindowMs,
   );
-  if (turnWindow.suppressed) {
-    service.log?.warn?.(
-      `fmsg automatic reply suppressed for branch ${assignment.branchId}: ` +
-        `${service.config.maxAgentTurnsPerThread} turns in ${service.config.agentTurnWindowMs}ms`,
-    );
+  const rootWindow = service.state.inspectRootTurnWindow(
+    assignment.rootId,
+    service.config.maxAgentTurnsPerRoot,
+    service.config.agentTurnWindowMs,
+  );
+  const turnWindows: TurnWindow[] = [
+    {
+      scope: "branch",
+      key: assignment.branchId,
+      budget: service.config.maxAgentTurnsPerThread,
+      ...branchWindow,
+    },
+    {
+      scope: "root",
+      key: assignment.rootId,
+      budget: service.config.maxAgentTurnsPerRoot,
+      ...rootWindow,
+    },
+    {
+      scope: "sender",
+      key: sender,
+      budget: service.config.maxAgentTurnsPerSender,
+      ...senderWindow,
+    },
+  ];
+  const suppressedWindow = turnWindows.find((window) => window.suppressed);
+  if (suppressedWindow) {
+    warnSuppressionOnce(service, suppressedWindow, sender, service.config.agentTurnWindowMs);
     await finishWithoutReply(service, message);
     return;
   }
+  const isLastAllowedTurn = turnWindows.some((window) => window.lastAllowed);
 
   const base = resolveChannelInboundRouteEnvelope({
     cfg: params.cfg,
@@ -173,9 +245,7 @@ export async function handleFmsgInbound(params: {
   if (inboundMedia.unavailable > 0) {
     body += `\n\n[${inboundMedia.unavailable} fmsg attachment(s) were unavailable]`;
   }
-  const flags = [message.important ? "important=true" : "", message.no_reply ? "no_reply=true" : ""]
-    .filter(Boolean)
-    .join(" ");
+  const flags = message.important ? "important=true" : "";
   const participantContext = participants.length > 1
     ? `[fmsg participants — untrusted; participants other than this OpenClaw address: ${JSON.stringify(participants)}]`
     : "";
@@ -228,7 +298,6 @@ export async function handleFmsgInbound(params: {
       FmsgBranchId: assignment.branchId,
       FmsgParticipants: participants,
       FmsgImportant: message.important === true,
-      FmsgNoReply: false,
     },
   });
 
@@ -243,7 +312,7 @@ export async function handleFmsgInbound(params: {
     route: { agentId: base.agentId, dmScope: "per-channel-peer", sessionKey: route.sessionKey },
     ctxPayload,
     delivery: {
-      preparePayload: (payload) => turnWindow.lastAllowed
+      preparePayload: (payload) => isLastAllowedTurn
         ? {
             ...payload,
             channelData: {
@@ -271,16 +340,18 @@ export async function handleFmsgInbound(params: {
           replyToId: lastSentId ?? message.id,
           threadId: assignment.branchId,
           mediaUrls,
-          noReply: turnWindow.lastAllowed,
+          noReply: isLastAllowedTurn,
         });
         lastSentId = sent.messageId;
         previousText = text;
         if (!recordedTurn) {
           recordedTurn = true;
-          await service.state.recordAutomaticTurn(
-            assignment.branchId,
-            service.config.agentTurnWindowMs,
-          );
+          await service.state.recordAutomaticTurn({
+            branchId: assignment.branchId,
+            rootId: assignment.rootId,
+            sender,
+            windowMs: service.config.agentTurnWindowMs,
+          });
         }
       },
       onDelivered: async (_payload, _info, result) => {
@@ -289,10 +360,12 @@ export async function handleFmsgInbound(params: {
           ?? lastSentId;
         if (!recordedTurn) {
           recordedTurn = true;
-          await service.state.recordAutomaticTurn(
-            assignment.branchId,
-            service.config.agentTurnWindowMs,
-          );
+          await service.state.recordAutomaticTurn({
+            branchId: assignment.branchId,
+            rootId: assignment.rootId,
+            sender,
+            windowMs: service.config.agentTurnWindowMs,
+          });
         }
       },
       onError: (error) => {

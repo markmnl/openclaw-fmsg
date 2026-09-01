@@ -8,6 +8,8 @@ import {
 } from "openclaw/plugin-sdk/secret-input";
 
 export const DEFAULT_MAX_AGENT_TURNS = 8;
+export const DEFAULT_MAX_AGENT_TURNS_PER_ROOT = 20;
+export const DEFAULT_MAX_AGENT_TURNS_PER_SENDER = 20;
 export const DEFAULT_AGENT_TURN_WINDOW_MS = 60_000;
 export const DEFAULT_MEDIA_MAX_BYTES = 10 * 1024 * 1024;
 
@@ -19,6 +21,8 @@ export type FmsgChannelConfig = {
   allowedUsers?: string[];
   allowAllUsers?: boolean;
   maxAgentTurnsPerThread?: number;
+  maxAgentTurnsPerRoot?: number;
+  maxAgentTurnsPerSender?: number;
   agentTurnWindowMs?: number;
   mediaMaxBytes?: number;
 };
@@ -37,6 +41,8 @@ export type ResolvedFmsgConfig = {
   allowedUsers: string[];
   allowAllUsers: boolean;
   maxAgentTurnsPerThread: number;
+  maxAgentTurnsPerRoot: number;
+  maxAgentTurnsPerSender: number;
   agentTurnWindowMs: number;
   mediaMaxBytes: number;
 };
@@ -85,11 +91,23 @@ export const fmsgChannelJsonSchema = {
       default: DEFAULT_MAX_AGENT_TURNS,
       description: "Automatic OpenClaw turns allowed per fmsg branch/window; 0 disables the circuit breaker.",
     },
+    maxAgentTurnsPerRoot: {
+      type: "integer",
+      minimum: 0,
+      default: DEFAULT_MAX_AGENT_TURNS_PER_ROOT,
+      description: "Automatic OpenClaw turns allowed across all branches of one fmsg root/window; 0 disables this circuit breaker.",
+    },
+    maxAgentTurnsPerSender: {
+      type: "integer",
+      minimum: 0,
+      default: DEFAULT_MAX_AGENT_TURNS_PER_SENDER,
+      description: "Automatic OpenClaw turns allowed for one normalized fmsg sender/window across all roots; 0 disables this circuit breaker.",
+    },
     agentTurnWindowMs: {
       type: "integer",
       minimum: 1,
       default: DEFAULT_AGENT_TURN_WINDOW_MS,
-      description: "Sliding per-branch automatic-turn window in milliseconds.",
+      description: "Sliding automatic-turn window in milliseconds shared by branch, root, and sender circuit breakers.",
     },
     mediaMaxBytes: {
       type: "integer",
@@ -201,6 +219,14 @@ export function resolveFmsgConfig(
       envInteger("FMSG_MAX_AGENT_TURNS_PER_THREAD", env.FMSG_MAX_AGENT_TURNS_PER_THREAD, 0) ??
       raw.maxAgentTurnsPerThread ??
       DEFAULT_MAX_AGENT_TURNS,
+    maxAgentTurnsPerRoot:
+      envInteger("FMSG_MAX_AGENT_TURNS_PER_ROOT", env.FMSG_MAX_AGENT_TURNS_PER_ROOT, 0) ??
+      raw.maxAgentTurnsPerRoot ??
+      DEFAULT_MAX_AGENT_TURNS_PER_ROOT,
+    maxAgentTurnsPerSender:
+      envInteger("FMSG_MAX_AGENT_TURNS_PER_SENDER", env.FMSG_MAX_AGENT_TURNS_PER_SENDER, 0) ??
+      raw.maxAgentTurnsPerSender ??
+      DEFAULT_MAX_AGENT_TURNS_PER_SENDER,
     agentTurnWindowMs:
       envInteger("FMSG_AGENT_TURN_WINDOW_MS", env.FMSG_AGENT_TURN_WINDOW_MS, 1) ??
       raw.agentTurnWindowMs ??

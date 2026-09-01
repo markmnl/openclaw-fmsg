@@ -21,6 +21,8 @@ describe("fmsg gateway status", () => {
             allowedUsers: [],
             allowAllUsers: false,
             maxAgentTurnsPerThread: 8,
+            maxAgentTurnsPerRoot: 20,
+            maxAgentTurnsPerSender: 20,
             agentTurnWindowMs: 60_000,
             mediaMaxBytes: 10_000_000,
           },

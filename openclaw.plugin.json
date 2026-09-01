@@ -61,11 +61,23 @@
             "default": 8,
             "description": "Automatic OpenClaw turns allowed per fmsg branch/window; 0 disables the circuit breaker."
           },
+          "maxAgentTurnsPerRoot": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 20,
+            "description": "Automatic OpenClaw turns allowed across all branches of one fmsg root/window; 0 disables this circuit breaker."
+          },
+          "maxAgentTurnsPerSender": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 20,
+            "description": "Automatic OpenClaw turns allowed for one normalized fmsg sender/window across all roots; 0 disables this circuit breaker."
+          },
           "agentTurnWindowMs": {
             "type": "integer",
             "minimum": 1,
             "default": 60000,
-            "description": "Sliding per-branch automatic-turn window in milliseconds."
+            "description": "Sliding automatic-turn window in milliseconds shared by branch, root, and sender circuit breakers."
           },
           "mediaMaxBytes": {
             "type": "integer",
