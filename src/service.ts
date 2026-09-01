@@ -12,6 +12,12 @@ export type ActiveFmsgAccount = {
   client: FmsgClient;
   state: FmsgStateStore;
   log?: LogSink;
+  setStatus?: (patch: {
+    lastInboundAt?: number;
+    lastOutboundAt?: number;
+    lastError?: string | null;
+    stateReason?: string;
+  }) => void;
 };
 
 const activeAccounts = new Map<string, ActiveFmsgAccount>();
@@ -41,6 +47,7 @@ export async function resolveFmsgService(params: {
   const active = activeAccounts.get(accountId);
   if (active) return active;
   const account = resolveFmsgAccount(params.cfg, accountId);
+  if (!account.config.apiUrl) throw new Error("fmsg API URL is not configured");
   if (!account.config.apiKey) throw new Error("fmsg API key is not configured");
   const state = new FmsgStateStore(fmsgStatePath(accountId));
   await state.load();

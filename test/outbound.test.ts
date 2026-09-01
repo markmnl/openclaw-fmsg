@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { FmsgClient } from "../src/client.js";
+import { fmsgChannelPlugin } from "../src/channel.js";
 import { sendFmsgOutbound } from "../src/outbound.js";
 import { registerActiveFmsgAccount } from "../src/service.js";
 import { FmsgStateStore } from "../src/state.js";
@@ -65,8 +66,8 @@ describe("fmsg outbound semantics", () => {
       "@carol@example.net",
       "@dave@example.org",
     ]);
-    const draft = server.requests.find((request) => request.method === "POST" && request.path === "/fmsg")?.body as { pid: string; to: string[] };
-    expect(draft).toMatchObject({ pid: "10", to: sent.recipients });
+    const draft = server.requests.find((request) => request.method === "POST" && request.path === "/fmsg")?.body as { pid: number; to: string[] };
+    expect(draft).toMatchObject({ pid: 10, to: sent.recipients });
   });
 
   it("continues only the most recent strict one-to-one thread", async () => {
@@ -113,5 +114,18 @@ describe("fmsg outbound semantics", () => {
     expect(sent.pid).toBeUndefined();
     const draft = server.requests.find((request) => request.method === "POST" && request.path === "/fmsg")?.body as { topic: string };
     expect(draft.topic).toBe("Fresh topic");
+  });
+
+  it("reports the authenticated channel identity through directory.self", async () => {
+    const identity = await fmsgChannelPlugin.directory?.self?.({
+      cfg: {} as never,
+      accountId: "default",
+      runtime: {} as never,
+    });
+    expect(identity).toMatchObject({
+      kind: "user",
+      id: "@agent@example.com",
+      handle: "@agent@example.com",
+    });
   });
 });

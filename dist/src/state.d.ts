@@ -12,6 +12,7 @@ export declare class FmsgStateStore {
     hasProcessed(messageId: string): boolean;
     markProcessed(messageId: string): Promise<void>;
     get highWaterId(): string | undefined;
+    get pendingInboundIds(): string[];
     getMessage(id: string): StoredMessage | undefined;
     getLastInbound(branchId: string): string | undefined;
     getLastOutbound(branchId: string): string | undefined;

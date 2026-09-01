@@ -1,5 +1,5 @@
 import WebSocket from "ws";
-import { normalizeFmsgMessage } from "./client.js";
+import { FmsgClient, normalizeFmsgMessage } from "./client.js";
 import { formatSafeError } from "./redact.js";
 import { compareMessageIds } from "./state.js";
 function waitForOpen(socket, signal) {
@@ -90,22 +90,41 @@ function closeAndWait(socket) {
     });
 }
 async function catchUp(options, enqueue) {
-    const collected = [];
+    const collected = new Map();
+    for (const id of options.state.pendingInboundIds) {
+        if (options.signal.aborted || options.state.hasProcessed(id))
+            continue;
+        try {
+            const pending = await options.client.getMessage(id, options.signal);
+            collected.set(pending.id, pending);
+        }
+        catch (error) {
+            options.log?.warn?.(`fmsg pending inbox recovery failed for ${id}: ${formatSafeError(error)}`);
+        }
+    }
     let offset = 0;
     const pageSize = 100;
-    while (!options.signal.aborted && collected.length < 1000) {
+    while (!options.signal.aborted && offset < 1000) {
         const page = await options.client.listInbox(pageSize, offset, options.signal);
-        collected.push(...page);
-        if (page.length < pageSize || page.some((message) => options.state.hasProcessed(message.id)))
+        for (const message of page)
+            collected.set(message.id, message);
+        if (page.length < pageSize)
             break;
         offset += page.length;
     }
+    const messages = [...collected.values()];
     const selected = options.state.highWaterId
-        ? collected.filter((message) => !options.state.hasProcessed(message.id))
-        : collected.filter((message) => !message.read).slice(0, 50);
+        ? messages.filter((message) => !options.state.hasProcessed(message.id))
+        : messages.filter((message) => !message.read).slice(0, 50);
     selected.sort((left, right) => compareMessageIds(left.id, right.id));
-    for (const message of selected)
+    let delivered = 0;
+    for (const message of selected) {
+        if (options.signal.aborted)
+            break;
         await enqueue(message);
+        delivered++;
+    }
+    return delivered;
 }
 export async function runFmsgConnection(options) {
     const random = options.random ?? Math.random;
@@ -115,6 +134,7 @@ export async function runFmsgConnection(options) {
         let queue = Promise.resolve();
         const connectedAt = Date.now();
         try {
+            options.onReconnectAttempt?.(attempt);
             const opened = await options.client.openWebSocket();
             socket = opened.socket;
             const enqueue = (message) => {
@@ -136,9 +156,10 @@ export async function runFmsgConnection(options) {
             });
             socket.on("error", (error) => options.log?.warn?.(`fmsg websocket error: ${formatSafeError(error)}`));
             await waitForOpen(socket, options.signal);
-            options.log?.info?.("fmsg connected");
-            options.onReady?.();
-            await catchUp(options, enqueue);
+            options.log?.info?.(`fmsg connected as ${opened.token.sender}`);
+            options.onReady?.(opened.token);
+            const caughtUp = await catchUp(options, enqueue);
+            options.log?.info?.(`fmsg inbox catch-up complete (${caughtUp} message${caughtUp === 1 ? "" : "s"})`);
             const tokenTtlMs = Math.max(1000, opened.token.expiresAtMs - Date.now());
             const refreshMarginMs = Math.min(300_000, Math.floor(tokenTtlMs / 2));
             await waitForClose(socket, options.signal, tokenTtlMs - refreshMarginMs);
@@ -163,12 +184,7 @@ export async function runFmsgConnection(options) {
     }
 }
 function FmsgClientEvent(raw) {
-    try {
-        return JSON.parse(raw.toString());
-    }
-    catch {
-        return undefined;
-    }
+    return FmsgClient.parseWsEvent(raw);
 }
 function isMessage(value) {
     if (!value || typeof value !== "object")

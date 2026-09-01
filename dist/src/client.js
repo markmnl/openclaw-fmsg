@@ -1,5 +1,6 @@
 import WebSocket from "ws";
 import { normalizeFmsgAddress } from "./config.js";
+import { normalizeFmsgMessageId, parseFmsgJson, stringifyWithFmsgInt64, } from "./message-id.js";
 import { formatSafeError, redactSecrets } from "./redact.js";
 export function normalizeFmsgMessage(value) {
     if (!value || typeof value !== "object")
@@ -13,8 +14,10 @@ export function normalizeFmsgMessage(value) {
     }
     return {
         ...raw,
-        id: String(raw.id),
-        ...(raw.pid !== undefined && raw.pid !== null ? { pid: String(raw.pid) } : {}),
+        id: normalizeFmsgMessageId(raw.id),
+        ...(raw.pid !== undefined && raw.pid !== null
+            ? { pid: normalizeFmsgMessageId(raw.pid, "pid") }
+            : {}),
         from: raw.from,
         to: raw.to,
     };
@@ -130,21 +133,21 @@ export class FmsgClient {
     }
     async listInbox(limit = 100, offset = 0, signal) {
         const response = await this.request(`/fmsg?limit=${limit}&offset=${offset}`, { signal });
-        const body = await response.json();
+        const body = parseFmsgJson(await response.text());
         if (!Array.isArray(body))
             throw new Error("fmsg inbox response is not an array");
         return body.map(normalizeFmsgMessage);
     }
     async listSent(limit = 50, offset = 0, signal) {
         const response = await this.request(`/fmsg/sent?limit=${limit}&offset=${offset}`, { signal });
-        const body = await response.json();
+        const body = parseFmsgJson(await response.text());
         if (!Array.isArray(body))
             throw new Error("fmsg sent response is not an array");
         return body.map(normalizeFmsgMessage);
     }
     async getMessage(id, signal) {
         const response = await this.request(`/fmsg/${encodeURIComponent(id)}`, { signal });
-        return normalizeFmsgMessage(await response.json());
+        return normalizeFmsgMessage(parseFmsgJson(await response.text()));
     }
     async getMessageData(id, signal) {
         const response = await this.request(`/fmsg/${encodeURIComponent(id)}/data`, { signal });
@@ -181,21 +184,21 @@ export class FmsgClient {
             type: "text/plain; charset=utf-8",
             size: Buffer.byteLength(text, "utf8"),
             data: text,
-            ...(input.pid ? { pid: input.pid } : { topic: input.topic ?? "" }),
+            ...(input.pid ? {} : { topic: input.topic ?? "" }),
             ...(input.important ? { important: true } : {}),
             ...(input.noReply ? { no_reply: true } : {}),
         };
         const response = await this.request("/fmsg", {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify(body),
+            body: input.pid ? stringifyWithFmsgInt64(body, "pid", input.pid) : JSON.stringify(body),
             signal: input.signal,
         });
-        const result = (await response.json());
-        if ((typeof result.id !== "string" && typeof result.id !== "number") || String(result.id) === "") {
+        const result = parseFmsgJson(await response.text());
+        if (result.id === undefined || result.id === null) {
             throw new Error("fmsg draft response has no id");
         }
-        return String(result.id);
+        return normalizeFmsgMessageId(result.id);
     }
     async uploadAttachment(draftId, attachment, signal) {
         const form = new FormData();
@@ -226,9 +229,11 @@ export class FmsgClient {
                 method: "POST",
                 signal: input.signal,
             });
-            const result = (await response.json());
+            const result = parseFmsgJson(await response.text());
             return {
-                id: typeof result.id === "string" || typeof result.id === "number" ? String(result.id) : draftId,
+                id: result.id === undefined || result.id === null
+                    ? draftId
+                    : normalizeFmsgMessageId(result.id),
                 ...(result.time !== undefined ? { time: result.time } : {}),
             };
         }
@@ -250,7 +255,7 @@ export class FmsgClient {
     }
     static parseWsEvent(raw) {
         try {
-            const parsed = JSON.parse(raw.toString());
+            const parsed = parseFmsgJson(raw.toString());
             return parsed && typeof parsed.type === "string" ? parsed : undefined;
         }
         catch {

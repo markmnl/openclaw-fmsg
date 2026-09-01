@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { WebSocket, WebSocketServer } from "ws";
+import { compareFmsgMessageIds, normalizeFmsgMessageId, parseFmsgJson } from "../src/message-id.js";
 import type { FmsgMessage } from "../src/types.js";
 
 type Stored = FmsgMessage & {
@@ -14,6 +15,7 @@ export type FakeRequest = {
   method: string;
   path: string;
   body?: unknown;
+  rawBody?: string;
 };
 
 function jwt(subject: string, expiresAtSeconds = Math.floor(Date.now() / 1000) + 3600): string {
@@ -41,7 +43,12 @@ async function requestBody(request: IncomingMessage): Promise<Buffer> {
 
 function json(response: ServerResponse, status: number, value: unknown): void {
   response.writeHead(status, { "content-type": "application/json" });
-  response.end(JSON.stringify(value));
+  // Match Go's int64 JSON encoding without first coercing through a JS number.
+  const body = JSON.stringify(value).replace(
+    /"(id|pid)":"([0-9]+)"/gu,
+    (_match, field: string, id: string) => `"${field}":${id}`,
+  );
+  response.end(body);
 }
 
 export class FakeFmsgServer {
@@ -103,7 +110,8 @@ export class FakeFmsgServer {
 
   seedMessage(input: Omit<FmsgMessage, "id"> & { id?: string | number; data?: string }): FmsgMessage {
     const id = String(input.id ?? this.nextId++);
-    this.nextId = Math.max(this.nextId, Number(id) + 1 || this.nextId);
+    const numericId = Number(id);
+    if (Number.isSafeInteger(numericId)) this.nextId = Math.max(this.nextId, numericId + 1);
     const data = input.data ?? input.short_text ?? "";
     const message: Stored = {
       ...input,
@@ -174,7 +182,7 @@ export class FakeFmsgServer {
       const offset = Number(url.searchParams.get("offset") ?? 0);
       const result = [...this.messages.values()]
         .filter((message) => message.sent && !message.deleted && message.to.includes(subject))
-        .sort((left, right) => Number(right.id) - Number(left.id))
+        .sort((left, right) => compareFmsgMessageIds(right.id, left.id))
         .slice(offset, offset + limit)
         .map((message) => ({
           ...this.publicMessage(message),
@@ -189,7 +197,7 @@ export class FakeFmsgServer {
       const offset = Number(url.searchParams.get("offset") ?? 0);
       const result = [...this.messages.values()]
         .filter((message) => !message.deleted && message.from === subject)
-        .sort((left, right) => Number(right.id) - Number(left.id))
+        .sort((left, right) => compareFmsgMessageIds(right.id, left.id))
         .slice(offset, offset + limit)
         .map((message) => this.publicMessage(message));
       this.requests.push({ method, path });
@@ -200,8 +208,22 @@ export class FakeFmsgServer {
     if (parts[0] !== "fmsg") return json(response, 404, { error: "not found" });
 
     if (method === "POST" && parts.length === 1) {
-      const body = JSON.parse((await requestBody(request)).toString("utf8")) as FmsgMessage & { data: string };
-      this.requests.push({ method, path, body });
+      const rawBody = (await requestBody(request)).toString("utf8");
+      const wireBody = JSON.parse(rawBody) as Record<string, unknown>;
+      const body = parseFmsgJson<FmsgMessage & { data: string }>(rawBody);
+      this.requests.push({ method, path, body: wireBody, rawBody });
+      if (body.pid !== undefined) {
+        if (typeof wireBody.pid !== "number" || !Number.isInteger(wireBody.pid)) {
+          return json(response, 400, {
+            error: "json: cannot unmarshal string into Go struct field messageInput.Message.pid of type int64",
+          });
+        }
+        try {
+          body.pid = normalizeFmsgMessageId(body.pid, "pid");
+        } catch (error) {
+          return json(response, 400, { error: (error as Error).message });
+        }
+      }
       if (body.from !== subject) return json(response, 403, { error: "from does not match JWT" });
       const id = String(this.nextId++);
       this.messages.set(id, {

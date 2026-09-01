@@ -18,8 +18,15 @@ import {
   resolveFmsgAccount,
   type ResolvedFmsgAccount,
 } from "./config.js";
-import { startFmsgGatewayAccount } from "./gateway.js";
-import { sendFmsgOutbound } from "./outbound.js";
+import { fmsgChannelSecrets } from "./secret-contract.js";
+import { fmsgSetupContract, fmsgSetupWizard } from "./setup.js";
+
+async function sendFmsgOutbound(
+  params: Parameters<(typeof import("./outbound.js"))["sendFmsgOutbound"]>[0],
+) {
+  const outbound = await import("./outbound.js");
+  return outbound.sendFmsgOutbound(params);
+}
 
 const CHANNEL_ID = "fmsg";
 
@@ -67,6 +74,7 @@ async function sendPayload(ctx: ChannelMessageSendPayloadContext) {
     mediaAccess: ctx.mediaAccess,
     mediaLocalRoots: ctx.mediaLocalRoots,
     mediaReadFile: ctx.mediaReadFile,
+    noReply: (ctx.payload.channelData?.fmsg as { noReply?: unknown } | undefined)?.noReply === true,
     signal: ctx.signal,
   });
   return {
@@ -127,7 +135,7 @@ export const fmsgChannelPlugin: ChannelPlugin<ResolvedFmsgAccount> = createChatC
       id: CHANNEL_ID,
       label: "fmsg",
       selectionLabel: "fmsg (Federated Messaging)",
-      docsPath: "https://github.com/fmsg/openclaw-fmsg#readme",
+      docsPath: "https://github.com/markmnl/openclaw-fmsg#readme",
       docsLabel: "documentation",
       blurb: "Federated, threaded messaging over the fmsg Web API.",
       order: 75,
@@ -140,6 +148,9 @@ export const fmsgChannelPlugin: ChannelPlugin<ResolvedFmsgAccount> = createChatC
     },
     reload: { configPrefixes: ["channels.fmsg"] },
     configSchema: fmsgChannelConfigSchema,
+    setupContract: fmsgSetupContract,
+    setupWizard: fmsgSetupWizard,
+    secrets: fmsgChannelSecrets,
     config: {
       listAccountIds: listFmsgAccountIds,
       resolveAccount: (cfg, accountId) => resolveFmsgAccount(cfg, accountId),
@@ -207,9 +218,20 @@ export const fmsgChannelPlugin: ChannelPlugin<ResolvedFmsgAccount> = createChatC
         hasRepliedRef,
       }),
     },
+    directory: {
+      self: async ({ cfg, accountId }) => {
+        const { resolveFmsgService } = await import("./service.js");
+        const service = await resolveFmsgService({ cfg, accountId });
+        const identity = (await service.client.getToken()).sender;
+        return { kind: "user", id: identity, name: identity, handle: identity };
+      },
+    },
     message: messageAdapter,
     gateway: {
-      startAccount: startFmsgGatewayAccount,
+      startAccount: async (ctx) => {
+        const gateway = await import("./gateway.js");
+        return gateway.startFmsgGatewayAccount(ctx);
+      },
     },
   },
   security: {

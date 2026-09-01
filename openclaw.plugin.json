@@ -26,12 +26,24 @@
           "apiUrl": {
             "type": "string",
             "format": "uri",
-            "default": "https://api.fmsg.io"
+            "pattern": "^https?://",
+            "description": "Explicit fmsg Web API base URL; no hosted endpoint is assumed."
           },
           "apiKey": {
-            "type": "string",
-            "pattern": "^fmsgk_",
-            "description": "fmsg API key. FMSG_API_KEY takes precedence."
+            "oneOf": [
+              { "type": "string", "minLength": 1 },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["source", "provider", "id"],
+                "properties": {
+                  "source": { "type": "string", "enum": ["env", "file", "exec", "store"] },
+                  "provider": { "type": "string", "minLength": 1 },
+                  "id": { "type": "string", "minLength": 1 }
+                }
+              }
+            ],
+            "description": "fmsg API key or OpenClaw SecretRef. FMSG_API_KEY takes precedence."
           },
           "homeChannel": {
             "type": "string",

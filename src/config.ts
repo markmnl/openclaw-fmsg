@@ -1,8 +1,12 @@
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import { buildJsonChannelConfigSchema } from "openclaw/plugin-sdk/channel-config-schema";
 import type { ChannelPlugin } from "openclaw/plugin-sdk/channel-core";
+import {
+  hasConfiguredSecretInput,
+  normalizeResolvedSecretInputString,
+  type SecretInput,
+} from "openclaw/plugin-sdk/secret-input";
 
-export const DEFAULT_API_URL = "https://api.fmsg.io";
 export const DEFAULT_MAX_AGENT_TURNS = 8;
 export const DEFAULT_AGENT_TURN_WINDOW_MS = 60_000;
 export const DEFAULT_MEDIA_MAX_BYTES = 10 * 1024 * 1024;
@@ -10,7 +14,7 @@ export const DEFAULT_MEDIA_MAX_BYTES = 10 * 1024 * 1024;
 export type FmsgChannelConfig = {
   enabled?: boolean;
   apiUrl?: string;
-  apiKey?: string;
+  apiKey?: SecretInput;
   homeChannel?: string;
   allowedUsers?: string[];
   allowAllUsers?: boolean;
@@ -27,7 +31,7 @@ export type ResolvedFmsgAccount = {
 };
 
 export type ResolvedFmsgConfig = {
-  apiUrl: string;
+  apiUrl?: string;
   apiKey?: string;
   homeChannel?: string;
   allowedUsers: string[];
@@ -37,13 +41,37 @@ export type ResolvedFmsgConfig = {
   mediaMaxBytes: number;
 };
 
+export const secretInputJsonSchema = {
+  oneOf: [
+    { type: "string", minLength: 1 },
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["source", "provider", "id"],
+      properties: {
+        source: { type: "string", enum: ["env", "file", "exec", "store"] },
+        provider: { type: "string", minLength: 1 },
+        id: { type: "string", minLength: 1 },
+      },
+    },
+  ],
+} as const;
+
 export const fmsgChannelJsonSchema = {
   type: "object",
   additionalProperties: false,
   properties: {
     enabled: { type: "boolean", default: true },
-    apiUrl: { type: "string", format: "uri", default: DEFAULT_API_URL },
-    apiKey: { type: "string", pattern: "^fmsgk_" },
+    apiUrl: {
+      type: "string",
+      format: "uri",
+      pattern: "^https?://",
+      description: "Explicit fmsg Web API base URL; no hosted endpoint is assumed.",
+    },
+    apiKey: {
+      ...secretInputJsonSchema,
+      description: "fmsg API key or OpenClaw SecretRef. FMSG_API_KEY takes precedence.",
+    },
     homeChannel: { type: "string", pattern: "^@[^@\\s]+@[^@\\s]+$" },
     allowedUsers: {
       type: "array",
@@ -72,14 +100,42 @@ export const fmsgChannelJsonSchema = {
 } as const;
 
 export const fmsgChannelConfigSchema: NonNullable<ChannelPlugin["configSchema"]> =
-  buildJsonChannelConfigSchema(fmsgChannelJsonSchema);
+  buildJsonChannelConfigSchema(fmsgChannelJsonSchema, {
+    uiHints: {
+      apiKey: {
+        label: "fmsg API key",
+        help: "Use a plaintext fmsgk_ value or an OpenClaw SecretRef.",
+        sensitive: true,
+      },
+      apiUrl: {
+        label: "fmsg API URL",
+        help: "Required base URL for your fmsg Web API deployment.",
+      },
+      homeChannel: {
+        label: "Home fmsg address",
+        help: "Default operator destination and fallback allowlist entry in @user@domain form; this does not grant OpenClaw owner privileges.",
+      },
+    },
+  });
 
 type ConfigWithFmsg = OpenClawConfig & {
   channels?: OpenClawConfig["channels"] & { fmsg?: FmsgChannelConfig };
 };
 
-function rawFmsgConfig(cfg: OpenClawConfig): FmsgChannelConfig {
+export function rawFmsgConfig(cfg: OpenClawConfig): FmsgChannelConfig {
   return (cfg as ConfigWithFmsg).channels?.fmsg ?? {};
+}
+
+export function normalizeFmsgApiUrl(value: string): string | undefined {
+  const normalized = value.trim().replace(/\/+$/u, "");
+  if (!normalized) return undefined;
+  try {
+    const url = new URL(normalized);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return undefined;
+    return normalized;
+  } catch {
+    return undefined;
+  }
 }
 
 function envBoolean(value: string | undefined): boolean | undefined {
@@ -119,14 +175,24 @@ export function resolveFmsgConfig(
 ): ResolvedFmsgConfig {
   const raw = rawFmsgConfig(cfg);
   const envAllowed = env.FMSG_ALLOWED_USERS?.split(",").map((value) => value.trim()).filter(Boolean);
-  const apiUrl = (env.FMSG_API_URL?.trim() || raw.apiUrl?.trim() || DEFAULT_API_URL).replace(/\/+$/u, "");
-  const apiKey = env.FMSG_API_KEY?.trim() || raw.apiKey?.trim() || undefined;
+  const apiUrlRaw = env.FMSG_API_URL?.trim() || raw.apiUrl?.trim();
+  const apiUrl = apiUrlRaw ? normalizeFmsgApiUrl(apiUrlRaw) : undefined;
+  if (apiUrlRaw && !apiUrl) throw new Error(`Invalid fmsg apiUrl: ${apiUrlRaw}`);
+  const apiKey =
+    env.FMSG_API_KEY?.trim() ||
+    normalizeResolvedSecretInputString({
+      value: raw.apiKey,
+      path: "channels.fmsg.apiKey",
+    });
+  if (apiKey && !apiKey.startsWith("fmsgk_")) {
+    throw new Error("fmsg apiKey must start with fmsgk_");
+  }
   const homeRaw = env.FMSG_HOME_CHANNEL?.trim() || raw.homeChannel?.trim();
   const homeChannel = homeRaw ? normalizeFmsgAddress(homeRaw) : undefined;
   if (homeRaw && !homeChannel) throw new Error(`Invalid fmsg homeChannel: ${homeRaw}`);
 
   return {
-    apiUrl,
+    ...(apiUrl ? { apiUrl } : {}),
     ...(apiKey ? { apiKey } : {}),
     ...(homeChannel ? { homeChannel } : {}),
     allowedUsers: normalizeAddressList(envAllowed ?? raw.allowedUsers ?? []),
@@ -161,7 +227,9 @@ export function isFmsgSenderAllowed(config: ResolvedFmsgConfig, sender: string):
 
 export function listFmsgAccountIds(cfg: OpenClawConfig): string[] {
   const raw = rawFmsgConfig(cfg);
-  return Object.keys(raw).length > 0 || process.env.FMSG_API_KEY ? ["default"] : [];
+  return Object.keys(raw).length > 0 || process.env.FMSG_API_KEY || process.env.FMSG_API_URL
+    ? ["default"]
+    : [];
 }
 
 export function resolveFmsgAccount(cfg: OpenClawConfig, accountId?: string | null): ResolvedFmsgAccount {
@@ -170,7 +238,30 @@ export function resolveFmsgAccount(cfg: OpenClawConfig, accountId?: string | nul
   return {
     accountId: accountId?.trim() || "default",
     enabled: raw.enabled !== false,
-    configured: Boolean(config.apiKey),
+    configured: Boolean(config.apiUrl && config.apiKey),
     config,
   };
+}
+
+export function hasConfiguredFmsgApiKey(
+  cfg: OpenClawConfig,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return Boolean(env.FMSG_API_KEY?.trim()) || hasConfiguredSecretInput(rawFmsgConfig(cfg).apiKey);
+}
+
+export function hasConfiguredFmsgApiUrl(
+  cfg: OpenClawConfig,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const value = env.FMSG_API_URL?.trim() || rawFmsgConfig(cfg).apiUrl?.trim();
+  return Boolean(value && normalizeFmsgApiUrl(value));
+}
+
+export function hasConfiguredFmsgHomeChannel(
+  cfg: OpenClawConfig,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const value = env.FMSG_HOME_CHANNEL?.trim() || rawFmsgConfig(cfg).homeChannel?.trim();
+  return Boolean(value && normalizeFmsgAddress(value));
 }

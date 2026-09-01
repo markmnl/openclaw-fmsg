@@ -1,7 +1,7 @@
 import path from "node:path";
 import { loadOutboundMediaFromUrl, } from "openclaw/plugin-sdk/outbound-media";
 import { normalizeFmsgAddress } from "./config.js";
-import { redactSecrets } from "./redact.js";
+import { formatSafeError, redactSecrets } from "./redact.js";
 import { resolveFmsgService } from "./service.js";
 import { findMostRecentDirectMessage, isStrictDmWith, participantsFromMessage, replyAllRecipients, } from "./threading.js";
 async function loadAttachments(service, options) {
@@ -60,15 +60,26 @@ export async function sendFmsgOutbound(params) {
         recipients.push(counterparty);
     const attachments = await loadAttachments(service, params);
     const topic = params.topic?.trim() || "OpenClaw";
-    const result = await service.client.sendMessage({
-        to: recipients,
-        text: redactSecrets(params.text),
-        ...(parent.pid ? { pid: parent.pid } : { topic }),
-        ...(params.important ? { important: true } : {}),
-        ...(params.noReply ? { noReply: true } : {}),
-        ...(attachments.length ? { attachments } : {}),
-        ...(params.signal ? { signal: params.signal } : {}),
-    });
+    let result;
+    try {
+        result = await service.client.sendMessage({
+            to: recipients,
+            text: redactSecrets(params.text),
+            ...(parent.pid ? { pid: parent.pid } : { topic }),
+            ...(params.important ? { important: true } : {}),
+            ...(params.noReply ? { noReply: true } : {}),
+            ...(attachments.length ? { attachments } : {}),
+            ...(params.signal ? { signal: params.signal } : {}),
+        });
+        service.setStatus?.({ lastOutboundAt: Date.now(), lastError: null, stateReason: "ready" });
+    }
+    catch (error) {
+        service.setStatus?.({
+            lastError: formatSafeError(error),
+            stateReason: "fmsg message was not delivered",
+        });
+        throw error;
+    }
     const assignment = await service.state.recordOutbound({
         id: result.id,
         ...(parent.pid ? { pid: parent.pid } : { topic }),

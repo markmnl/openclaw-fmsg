@@ -229,6 +229,7 @@ export async function handleFmsgInbound(params: {
   let lastSentId: string | undefined;
   let recordedTurn = false;
   let previousText = "";
+  const deliveryErrors: unknown[] = [];
   const dispatch = await params.channelRuntime.inbound.dispatch({
     cfg: params.cfg,
     channel: "fmsg",
@@ -236,6 +237,21 @@ export async function handleFmsgInbound(params: {
     route: { agentId: base.agentId, dmScope: "per-channel-peer", sessionKey: route.sessionKey },
     ctxPayload,
     delivery: {
+      preparePayload: (payload) => turnWindow.lastAllowed
+        ? {
+            ...payload,
+            channelData: {
+              ...payload.channelData,
+              fmsg: { noReply: true },
+            },
+          }
+        : payload,
+      durable: () => ({
+        to: sender,
+        replyToId: lastSentId ?? message.id,
+        replyToMode: "all",
+        threadId: assignment.branchId,
+      }),
       deliver: async (payload, info) => {
         const text = typeof payload.text === "string" ? payload.text : "";
         const mediaUrls = [...(payload.mediaUrls ?? []), ...(payload.mediaUrl ? [payload.mediaUrl] : [])];
@@ -261,12 +277,38 @@ export async function handleFmsgInbound(params: {
           );
         }
       },
-      onError: (error) => service.log?.error?.(`fmsg reply failed: ${formatSafeError(error)}`),
+      onDelivered: async (_payload, _info, result) => {
+        lastSentId = result?.receipt?.primaryPlatformMessageId
+          ?? result?.messageIds?.at(-1)
+          ?? lastSentId;
+        if (!recordedTurn) {
+          recordedTurn = true;
+          await service.state.recordAutomaticTurn(
+            assignment.branchId,
+            service.config.agentTurnWindowMs,
+          );
+        }
+      },
+      onError: (error) => {
+        deliveryErrors.push(error);
+        service.log?.error?.(
+          `fmsg reply not delivered for message ${message.id} branch ${assignment.branchId}: ${formatSafeError(error)}`,
+        );
+      },
     },
     replyPipeline: {},
   });
   if (dispatch.admission.kind !== "dispatch" || !dispatch.dispatched) {
     throw new Error(`OpenClaw declined fmsg turn: ${dispatch.admission.kind}`);
+  }
+  const receipt = dispatch.dispatchResult?.settledReceipt;
+  if (deliveryErrors.length > 0 && !receipt?.anyVisibleDelivered) {
+    throw new Error(`fmsg produced a reply but did not deliver it`, { cause: deliveryErrors[0] });
+  }
+  if (deliveryErrors.length > 0) {
+    service.log?.warn?.(
+      `fmsg reply was only partially delivered for message ${message.id} branch ${assignment.branchId}`,
+    );
   }
   await finishWithoutReply(service, message);
 }

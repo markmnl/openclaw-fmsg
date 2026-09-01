@@ -30,4 +30,23 @@ describe("OpenClaw channel registration and routing", () => {
     expect(route?.sessionKey).toBe(`${route?.baseSessionKey}:thread:100:br:102`);
     expect(route?.threadId).toBe("100:br:102");
   });
+
+  it("exposes the home address as a direct default and effective heartbeat owner candidate", () => {
+    const cfg = {
+      channels: {
+        fmsg: {
+          apiUrl: "https://fmsg-api.example.com",
+          apiKey: "fmsgk_test",
+          homeChannel: "@Owner@Example.com",
+          allowedUsers: [],
+        },
+      },
+    } as never;
+    expect(fmsgChannelPlugin.config.resolveAllowFrom?.({ cfg, accountId: "default" }))
+      .toEqual(["@owner@example.com"]);
+    expect(fmsgChannelPlugin.config.resolveDefaultTo?.({ cfg, accountId: "default" }))
+      .toBe("@owner@example.com");
+    expect(fmsgChannelPlugin.messaging?.inferTargetChatType?.({ to: "@owner@example.com" }))
+      .toBe("direct");
+  });
 });

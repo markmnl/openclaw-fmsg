@@ -9,6 +9,12 @@ export type ActiveFmsgAccount = {
     client: FmsgClient;
     state: FmsgStateStore;
     log?: LogSink;
+    setStatus?: (patch: {
+        lastInboundAt?: number;
+        lastOutboundAt?: number;
+        lastError?: string | null;
+        stateReason?: string;
+    }) => void;
 };
 export declare function fmsgStatePath(accountId: string, env?: NodeJS.ProcessEnv): string;
 export declare function registerActiveFmsgAccount(account: ActiveFmsgAccount): () => void;
