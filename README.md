@@ -34,7 +34,7 @@ Connect [OpenClaw](https://openclaw.ai) to [fmsg](https://fmsg.org), the federat
 ## Quick start
 
 ```bash
-openclaw plugins install @markmnl/openclaw-fmsg
+openclaw plugins install npm:@markmnl/openclaw-fmsg
 ```
 
 The published package contains TypeScript source for linked development and prebuilt JavaScript for managed installs. It has no install-time build hook and is compatible with OpenClaw/npm dependency installation using `--ignore-scripts`.
@@ -153,6 +153,12 @@ npm test
 npm run build
 npm pack --dry-run
 ```
+
+## Releasing
+
+Stable releases are published to npm by `.github/workflows/publish.yml` when a GitHub Release is published. The release tag must exactly match the version in `package.json`, prefixed with `v` (for example, package version `0.1.0` uses tag `v0.1.0`). Build and commit `dist/` with every version change before creating the release.
+
+The npm package must configure a trusted GitHub Actions publisher for repository `markmnl/openclaw-fmsg`, workflow `publish.yml`, with `npm publish` allowed. The workflow uses short-lived OIDC credentials and does not require an npm token secret.
 
 The unit suite runs an in-memory HTTP and WebSocket implementation of the fmsg Web API. It covers JWT exchange/refresh, drafts and attachments, WebSocket plus inbox catch-up, access control, branch mapping, native session routing, reply-all, output chaining, proactive one-to-one continuation, flags, secret redaction, persistence, and the circuit breaker.
 

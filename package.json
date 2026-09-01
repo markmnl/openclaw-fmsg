@@ -7,10 +7,10 @@
   "author": "Mark Mennell",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/fmsg/openclaw-fmsg.git"
+    "url": "git+https://github.com/markmnl/openclaw-fmsg.git"
   },
-  "homepage": "https://github.com/fmsg/openclaw-fmsg#readme",
-  "bugs": "https://github.com/fmsg/openclaw-fmsg/issues",
+  "homepage": "https://github.com/markmnl/openclaw-fmsg#readme",
+  "bugs": "https://github.com/markmnl/openclaw-fmsg/issues",
   "keywords": [
     "openclaw",
     "fmsg",
@@ -89,7 +89,7 @@
       "id": "fmsg",
       "label": "fmsg",
       "selectionLabel": "fmsg (Federated Messaging)",
-      "docsPath": "https://github.com/fmsg/openclaw-fmsg#readme",
+      "docsPath": "https://github.com/markmnl/openclaw-fmsg#readme",
       "docsLabel": "documentation",
       "blurb": "Federated, threaded messaging over fmsg Web API.",
       "order": 75,
