@@ -8,6 +8,23 @@ import { registerActiveFmsgAccount, type ActiveFmsgAccount } from "../src/servic
 import { FmsgStateStore } from "../src/state.js";
 import { FakeFmsgServer } from "./fake-fmsg-server.js";
 
+function successfulAutomaticDispatch() {
+  return vi.fn(async (request: {
+    delivery: {
+      onDelivered: (payload: unknown, info: unknown, result: unknown) => Promise<void>;
+    };
+  }) => {
+    await request.delivery.onDelivered({}, {}, {
+      receipt: { primaryPlatformMessageId: "delivered" },
+    });
+    return {
+      admission: { kind: "dispatch" },
+      dispatched: true,
+      dispatchResult: { settledReceipt: { counts: {}, anyVisibleDelivered: true } },
+    };
+  });
+}
+
 describe("fmsg inbound policy and reply delivery", () => {
   let server: FakeFmsgServer;
   let directory: string;
@@ -28,6 +45,8 @@ describe("fmsg inbound policy and reply delivery", () => {
         allowedUsers: ["@alice@example.net"],
         allowAllUsers: false,
         maxAgentTurnsPerThread: 8,
+        maxAgentTurnsPerRoot: 20,
+        maxAgentTurnsPerSender: 20,
         agentTurnWindowMs: 60_000,
         mediaMaxBytes: 10_000_000,
       },
@@ -44,13 +63,22 @@ describe("fmsg inbound policy and reply delivery", () => {
   });
 
   it("records and marks no_reply inbound without dispatching an agent turn", async () => {
+    server.seedMessage({
+      id: 49,
+      from: "@agent@example.com",
+      to: ["@alice@example.net"],
+      data: "parent",
+    });
     const message = server.seedMessage({
       id: 50,
+      pid: "49",
+      has_pid: true,
       from: "@alice@example.net",
       to: ["@agent@example.com"],
       no_reply: true,
       data: "do not answer",
     });
+    const getMessage = vi.spyOn(service.client, "getMessage");
     const dispatch = vi.fn();
     await handleFmsgInbound({
       cfg: {} as never,
@@ -60,8 +88,128 @@ describe("fmsg inbound policy and reply delivery", () => {
     });
     expect(dispatch).not.toHaveBeenCalled();
     expect(service.state.hasProcessed("50")).toBe(true);
-    expect(service.state.getMessage("50")?.noReply).toBe(true);
+    expect(service.state.getMessage("50")).toBeUndefined();
+    expect(getMessage).not.toHaveBeenCalled();
     expect(server.requests.map((request) => `${request.method} ${request.path}`)).toContain("POST /fmsg/50/read");
+  });
+
+  it("bounds sibling fan-out with the root turn budget", async () => {
+    service.config.maxAgentTurnsPerRoot = 3;
+    const warnings: string[] = [];
+    service.log = { warn: (value) => warnings.push(value) };
+    server.seedMessage({
+      id: 100,
+      from: "@agent@example.com",
+      to: ["@alice@example.net"],
+      data: "shared parent",
+    });
+    const dispatch = successfulAutomaticDispatch();
+
+    for (let index = 1; index <= 6; index++) {
+      const message = server.seedMessage({
+        id: 100 + index,
+        pid: "100",
+        has_pid: true,
+        from: "@alice@example.net",
+        to: ["@agent@example.com"],
+        data: `sibling ${index}`,
+      });
+      await handleFmsgInbound({
+        cfg: {} as never,
+        account: service,
+        channelRuntime: { inbound: { dispatch } } as never,
+        message,
+      });
+    }
+
+    expect(dispatch).toHaveBeenCalledTimes(3);
+    expect(service.state.inspectRootTurnWindow("100", 3, 60_000).count).toBe(3);
+    expect(warnings.filter((value) => value.includes("scope=root"))).toHaveLength(1);
+    expect(warnings[0]).toContain("key=100 sender=@alice@example.net budget=3");
+  });
+
+  it("keeps a normal linear exchange within the branch budget", async () => {
+    service.config.maxAgentTurnsPerThread = 3;
+    const dispatch = successfulAutomaticDispatch();
+    const inboundMessages = [
+      server.seedMessage({
+        id: 200,
+        from: "@alice@example.net",
+        to: ["@agent@example.com"],
+        data: "turn one",
+      }),
+    ];
+    server.seedMessage({
+      id: 201,
+      pid: "200",
+      has_pid: true,
+      from: "@agent@example.com",
+      to: ["@alice@example.net"],
+      data: "agent one",
+    });
+    inboundMessages.push(server.seedMessage({
+      id: 202,
+      pid: "201",
+      has_pid: true,
+      from: "@alice@example.net",
+      to: ["@agent@example.com"],
+      data: "turn two",
+    }));
+    server.seedMessage({
+      id: 203,
+      pid: "202",
+      has_pid: true,
+      from: "@agent@example.com",
+      to: ["@alice@example.net"],
+      data: "agent two",
+    });
+    inboundMessages.push(server.seedMessage({
+      id: 204,
+      pid: "203",
+      has_pid: true,
+      from: "@alice@example.net",
+      to: ["@agent@example.com"],
+      data: "turn three",
+    }));
+
+    for (const message of inboundMessages) {
+      await handleFmsgInbound({
+        cfg: {} as never,
+        account: service,
+        channelRuntime: { inbound: { dispatch } } as never,
+        message,
+      });
+    }
+
+    expect(dispatch).toHaveBeenCalledTimes(3);
+    expect(service.state.inspectTurnWindow("200", 3, 60_000).count).toBe(3);
+  });
+
+  it("bounds one sender across distinct root threads", async () => {
+    service.config.maxAgentTurnsPerSender = 3;
+    const warnings: string[] = [];
+    service.log = { warn: (value) => warnings.push(value) };
+    const dispatch = successfulAutomaticDispatch();
+
+    for (let index = 0; index < 6; index++) {
+      const message = server.seedMessage({
+        id: 300 + index,
+        from: "@alice@example.net",
+        to: ["@agent@example.com"],
+        data: `new root ${index}`,
+      });
+      await handleFmsgInbound({
+        cfg: {} as never,
+        account: service,
+        channelRuntime: { inbound: { dispatch } } as never,
+        message,
+      });
+    }
+
+    expect(dispatch).toHaveBeenCalledTimes(3);
+    expect(service.state.inspectSenderTurnWindow("@alice@example.net", 3, 60_000).count).toBe(3);
+    expect(warnings.filter((value) => value.includes("scope=sender"))).toHaveLength(1);
+    expect(warnings[0]).toContain("key=@alice@example.net sender=@alice@example.net budget=3");
   });
 
   it("chains multiple replies and resets their direct parent from the inbound", async () => {
@@ -104,7 +252,6 @@ describe("fmsg inbound policy and reply delivery", () => {
     expect(contextInput?.extra).toMatchObject({
       FmsgParticipants: ["@alice@example.net", "@bob@example.org"],
       FmsgImportant: true,
-      FmsgNoReply: false,
     });
     const bodyForAgent = (contextInput?.message as { bodyForAgent?: string }).bodyForAgent;
     expect(bodyForAgent).toContain("important=true");

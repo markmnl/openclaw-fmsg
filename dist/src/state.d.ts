@@ -33,12 +33,30 @@ export declare class FmsgStateStore {
         rootId?: string;
         noReply?: boolean;
     }): Promise<ThreadAssignment>;
+    private inspectTimestamps;
     inspectTurnWindow(branchId: string, maxTurns: number, windowMs: number, now?: number): {
         suppressed: boolean;
         lastAllowed: boolean;
         count: number;
     };
-    recordAutomaticTurn(branchId: string, windowMs: number, now?: number): Promise<void>;
+    inspectRootTurnWindow(rootId: string, maxTurns: number, windowMs: number, now?: number): {
+        suppressed: boolean;
+        lastAllowed: boolean;
+        count: number;
+    };
+    inspectSenderTurnWindow(sender: string, maxTurns: number, windowMs: number, now?: number): {
+        suppressed: boolean;
+        lastAllowed: boolean;
+        count: number;
+    };
+    private recordTimestamp;
+    recordAutomaticTurn(params: {
+        branchId: string;
+        rootId: string;
+        sender: string;
+        windowMs: number;
+        now?: number;
+    }): Promise<void>;
     private pruneMessages;
 }
 export declare function compareMessageIds(left: string, right: string): number;
