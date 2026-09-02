@@ -7,6 +7,7 @@ export type FmsgConnectionOptions = {
     signal: AbortSignal;
     log?: LogSink;
     onMessage: (message: FmsgMessage) => Promise<void>;
+    onReaction?: (message: FmsgMessage, source: "websocket" | "catch-up") => Promise<void>;
     onReady?: (token: FmsgToken) => void;
     onReconnectAttempt?: (attempt: number) => void;
     random?: () => number;

@@ -83,6 +83,24 @@
             "type": "integer",
             "minimum": 1,
             "default": 10485760
+          },
+          "actions": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "reactions": {
+                "type": "boolean",
+                "default": true,
+                "description": "Allow the shared OpenClaw message tool to add, change, clear, and list fmsg reactions."
+              }
+            },
+            "default": { "reactions": true }
+          },
+          "reactionNotifications": {
+            "type": "string",
+            "enum": ["off", "own", "all"],
+            "default": "own",
+            "description": "Surface no reactions, reactions to agent-authored messages, or reactions to all known messages."
           }
         }
       }

@@ -1,6 +1,6 @@
 {
   "name": "@markmnl/openclaw-fmsg",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "OpenClaw channel plugin for the federated messaging protocol fmsg",
   "type": "module",
   "license": "MIT",
@@ -86,8 +86,8 @@
       "minGatewayVersion": "2026.8.1"
     },
     "build": {
-      "openclawVersion": "2026.8.1",
-      "pluginSdkVersion": "2026.8.1"
+      "openclawVersion": "2026.8.2",
+      "pluginSdkVersion": "2026.8.2"
     },
     "channel": {
       "id": "fmsg",

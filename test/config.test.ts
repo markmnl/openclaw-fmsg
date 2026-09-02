@@ -37,6 +37,8 @@ describe("fmsg config", () => {
       maxAgentTurnsPerRoot: 24,
       maxAgentTurnsPerSender: 36,
       agentTurnWindowMs: 90000,
+      actions: { reactions: true },
+      reactionNotifications: "own",
     });
   });
 
@@ -107,5 +109,21 @@ describe("fmsg config", () => {
     expect(missing.config.apiUrl).toBeUndefined();
     expect(missing.configured).toBe(false);
     expect(configured.configured).toBe(true);
+  });
+
+  it("validates reaction action and notification settings", () => {
+    const parsed = fmsgChannelConfigSchema.runtime?.safeParse({
+      actions: { reactions: false },
+      reactionNotifications: "all",
+    });
+    expect(parsed?.success).toBe(true);
+    expect(resolveFmsgConfig({
+      channels: { fmsg: { actions: { reactions: false }, reactionNotifications: "off" } },
+    } as never, {})).toMatchObject({
+      actions: { reactions: false },
+      reactionNotifications: "off",
+    });
+    expect(fmsgChannelConfigSchema.runtime?.safeParse({ reactionNotifications: "mentions" })?.success)
+      .toBe(false);
   });
 });

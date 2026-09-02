@@ -11,6 +11,7 @@ export type FmsgConnectionOptions = {
   signal: AbortSignal;
   log?: LogSink;
   onMessage: (message: FmsgMessage) => Promise<void>;
+  onReaction?: (message: FmsgMessage, source: "websocket" | "catch-up") => Promise<void>;
   onReady?: (token: FmsgToken) => void;
   onReconnectAttempt?: (attempt: number) => void;
   random?: () => number;
@@ -103,7 +104,12 @@ function closeAndWait(socket: WebSocket): Promise<void> {
   });
 }
 
-async function catchUp(options: FmsgConnectionOptions, enqueue: (message: FmsgMessage) => Promise<void>): Promise<number> {
+async function catchUp(
+  options: FmsgConnectionOptions,
+  enqueue: (message: FmsgMessage) => Promise<void>,
+  enqueueReaction: (message: FmsgMessage, source: "websocket" | "catch-up") => Promise<void>,
+): Promise<{ delivered: number; reactions: number }> {
+  const highWaterIdBeforeCatchUp = options.state.highWaterId;
   const collected = new Map<string, FmsgMessage>();
   for (const id of options.state.pendingInboundIds) {
     if (options.signal.aborted || options.state.hasProcessed(id)) continue;
@@ -122,18 +128,71 @@ async function catchUp(options: FmsgConnectionOptions, enqueue: (message: FmsgMe
     if (page.length < pageSize) break;
     offset += page.length;
   }
+  const reactionSubjects = new Map(collected);
+  for (const message of collected.values()) {
+    if (message.reaction === null || message.reaction === undefined) continue;
+    if (message.pid) {
+      try {
+        const subject = await options.client.getMessage(message.pid, options.signal);
+        reactionSubjects.set(subject.id, subject);
+      } catch (error) {
+        options.log?.warn?.(
+          `fmsg reaction subject ${message.pid} recovery failed: ${formatSafeError(error)}`,
+        );
+      }
+    }
+    await options.state.markProcessed(message.id);
+    await options.client.markRead(message.id, options.signal).catch((error) =>
+      options.log?.warn?.(`fmsg reaction mark-read failed for ${message.id}: ${formatSafeError(error)}`),
+    );
+  }
+  if (options.onReaction) {
+    offset = 0;
+    while (!options.signal.aborted && offset < 1000) {
+      const page = await options.client.listSent(pageSize, offset, options.signal);
+      for (const message of page) {
+        reactionSubjects.set(message.id, message);
+        if (message.reaction !== null && message.reaction !== undefined && message.pid) {
+          try {
+            const subject = await options.client.getMessage(message.pid, options.signal);
+            reactionSubjects.set(subject.id, subject);
+          } catch (error) {
+            options.log?.warn?.(
+              `fmsg sent reaction subject ${message.pid} recovery failed: ${formatSafeError(error)}`,
+            );
+          }
+        }
+      }
+      if (page.length < pageSize) break;
+      offset += page.length;
+    }
+  }
+  let reactionUpdates = 0;
+  for (const message of reactionSubjects.values()) {
+    if (options.signal.aborted) break;
+    if ((message.reactions?.length ?? 0) === 0 && !options.state.hasReactionSnapshot(message.id)) continue;
+    await enqueueReaction(message, "catch-up");
+    reactionUpdates++;
+  }
   const messages = [...collected.values()];
-  const selected = options.state.highWaterId
-    ? messages.filter((message) => !options.state.hasProcessed(message.id))
-    : messages.filter((message) => !message.read).slice(0, 50);
+  const selected = highWaterIdBeforeCatchUp
+    ? messages.filter((message) => message.reaction == null && !options.state.hasProcessed(message.id))
+    : messages.filter((message) => message.reaction == null && !message.read).slice(0, 50);
   selected.sort((left, right) => compareMessageIds(left.id, right.id));
   let delivered = 0;
+  let firstDeliveryError: unknown;
   for (const message of selected) {
     if (options.signal.aborted) break;
-    await enqueue(message);
-    delivered++;
+    try {
+      await enqueue(message);
+      delivered++;
+    } catch (error) {
+      firstDeliveryError ??= error;
+      options.log?.warn?.(`fmsg inbox delivery failed for ${message.id}: ${formatSafeError(error)}`);
+    }
   }
-  return delivered;
+  if (firstDeliveryError) throw firstDeliveryError;
+  return { delivered, reactions: reactionUpdates };
 }
 
 export async function runFmsgConnection(options: FmsgConnectionOptions): Promise<void> {
@@ -142,35 +201,69 @@ export async function runFmsgConnection(options: FmsgConnectionOptions): Promise
   while (!options.signal.aborted) {
     let socket: WebSocket | undefined;
     let queue = Promise.resolve();
+    let catchUpComplete = false;
+    const bufferedLiveEvents: Array<() => Promise<void>> = [];
     const connectedAt = Date.now();
     try {
       options.onReconnectAttempt?.(attempt);
       const opened = await options.client.openWebSocket();
       socket = opened.socket;
-      const enqueue = (message: FmsgMessage) => {
+      const enqueueTask = (task: () => Promise<void>) => {
         // Keep later messages flowing even when one delivery fails. The caller
         // still receives the individual rejection for logging/retry handling.
-        const delivery = queue.catch(() => undefined).then(async () => {
-          if (options.state.hasProcessed(message.id)) return;
-          await options.onMessage(message);
-        });
+        const delivery = queue.catch(() => undefined).then(task);
         queue = delivery;
         return delivery;
+      };
+      const enqueue = (message: FmsgMessage) => enqueueTask(async () => {
+        if (options.state.hasProcessed(message.id)) return;
+        await options.onMessage(message);
+      });
+      const enqueueReaction = (
+        message: FmsgMessage,
+        source: "websocket" | "catch-up",
+      ) => enqueueTask(async () => {
+        await options.onReaction?.(message, source);
+      });
+      const enqueueLive = (task: () => Promise<void>, label: string) => {
+        if (!catchUpComplete) {
+          bufferedLiveEvents.push(task);
+          return;
+        }
+        void enqueueTask(task).catch((error) =>
+          options.log?.error?.(`fmsg ${label} failed: ${formatSafeError(error)}`),
+        );
       };
       socket.on("message", (raw) => {
         const event = FmsgClientEvent(raw);
         if (event?.type === "new_msg" && isMessage(event.data)) {
-          void enqueue(normalizeFmsgMessage(event.data)).catch((error) =>
-            options.log?.error?.(`fmsg inbound failed: ${formatSafeError(error)}`),
-          );
+          const message = normalizeFmsgMessage(event.data);
+          enqueueLive(async () => {
+            if (options.state.hasProcessed(message.id)) return;
+            await options.onMessage(message);
+          }, "inbound");
+        } else if (event?.type === "reaction" && isMessage(event.data)) {
+          const message = normalizeFmsgMessage(event.data);
+          enqueueLive(async () => {
+            await options.onReaction?.(message, "websocket");
+          }, "reaction update");
         }
       });
       socket.on("error", (error) => options.log?.warn?.(`fmsg websocket error: ${formatSafeError(error)}`));
       await waitForOpen(socket, options.signal);
       options.log?.info?.(`fmsg connected as ${opened.token.sender}`);
       options.onReady?.(opened.token);
-      const caughtUp = await catchUp(options, enqueue);
-      options.log?.info?.(`fmsg inbox catch-up complete (${caughtUp} message${caughtUp === 1 ? "" : "s"})`);
+      const caughtUp = await catchUp(options, enqueue, enqueueReaction);
+      catchUpComplete = true;
+      for (const event of bufferedLiveEvents.splice(0)) {
+        void enqueueTask(event).catch((error) =>
+          options.log?.error?.(`fmsg buffered event failed: ${formatSafeError(error)}`),
+        );
+      }
+      options.log?.info?.(
+        `fmsg inbox catch-up complete (${caughtUp.delivered} message${caughtUp.delivered === 1 ? "" : "s"}, ` +
+          `${caughtUp.reactions} reaction subject${caughtUp.reactions === 1 ? "" : "s"})`,
+      );
       const tokenTtlMs = Math.max(1000, opened.token.expiresAtMs - Date.now());
       const refreshMarginMs = Math.min(300_000, Math.floor(tokenTtlMs / 2));
       await waitForClose(socket, options.signal, tokenTtlMs - refreshMarginMs);

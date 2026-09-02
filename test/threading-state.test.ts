@@ -115,4 +115,31 @@ describe("thread mapping and state", () => {
     expect(reloaded.hasProcessed("42")).toBe(true);
     expect(reloaded.getMessage("42")?.branchId).toBe("42");
   });
+
+  it("persists and diffs effective reaction snapshots", async () => {
+    const subject = {
+      id: "50",
+      from: "@agent@example.com",
+      to: ["@alice@example.net"],
+      reactions: [{ emoji: "👍", from: ["@alice@example.net"] }],
+    };
+    await expect(state.recordReactionSnapshot(subject, { seedIfMissing: true, now: 1 }))
+      .resolves.toMatchObject({ initialized: false, changes: [] });
+    await expect(state.recordReactionSnapshot({
+      ...subject,
+      reactions: [{ emoji: "❤️", from: ["@alice@example.net"] }],
+    }, { now: 2 })).resolves.toMatchObject({
+      initialized: true,
+      generation: 2,
+      changes: [{ from: "@alice@example.net", previous: "👍", emoji: "❤️" }],
+    });
+    const reloaded = new FmsgStateStore(path.join(directory, "state.json"));
+    await reloaded.load();
+    expect(reloaded.getReactionSnapshot("50")).toEqual({ "@alice@example.net": "❤️" });
+    await expect(reloaded.recordReactionSnapshot({ ...subject, reactions: [] }, { now: 3 }))
+      .resolves.toMatchObject({
+        generation: 3,
+        changes: [{ from: "@alice@example.net", previous: "❤️" }],
+      });
+  });
 });

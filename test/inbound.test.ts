@@ -30,11 +30,14 @@ describe("fmsg inbound policy and reply delivery", () => {
   let directory: string;
   let service: ActiveFmsgAccount;
   let unregister: () => void;
+  let previousStateDir: string | undefined;
 
   beforeEach(async () => {
     server = new FakeFmsgServer();
     await server.start();
     directory = await mkdtemp(path.join(os.tmpdir(), "openclaw-fmsg-inbound-"));
+    previousStateDir = process.env.OPENCLAW_STATE_DIR;
+    process.env.OPENCLAW_STATE_DIR = directory;
     const state = new FmsgStateStore(path.join(directory, "state.json"));
     await state.load();
     service = {
@@ -49,6 +52,8 @@ describe("fmsg inbound policy and reply delivery", () => {
         maxAgentTurnsPerSender: 20,
         agentTurnWindowMs: 60_000,
         mediaMaxBytes: 10_000_000,
+        actions: { reactions: true },
+        reactionNotifications: "own",
       },
       client: new FmsgClient(server.url, "fmsgk_agent-test", { refreshMarginMs: 0 }),
       state,
@@ -60,6 +65,8 @@ describe("fmsg inbound policy and reply delivery", () => {
     unregister();
     await server.stop();
     await rm(directory, { recursive: true, force: true });
+    if (previousStateDir === undefined) delete process.env.OPENCLAW_STATE_DIR;
+    else process.env.OPENCLAW_STATE_DIR = previousStateDir;
   });
 
   it("records and marks no_reply inbound without dispatching an agent turn", async () => {

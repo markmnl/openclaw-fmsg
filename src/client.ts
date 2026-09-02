@@ -8,6 +8,7 @@ import {
 import { formatSafeError, redactSecrets } from "./redact.js";
 import type {
   FmsgMessage,
+  FmsgReactResult,
   FmsgSendInput,
   FmsgSendResult,
   FmsgToken,
@@ -27,6 +28,17 @@ export function normalizeFmsgMessage(value: unknown): FmsgMessage {
   if (!Array.isArray(raw.to) || !raw.to.every((entry) => typeof entry === "string")) {
     throw new Error("fmsg returned a message without recipients");
   }
+  const reactions = Array.isArray(raw.reactions)
+    ? raw.reactions.flatMap((entry) => {
+        if (!entry || typeof entry !== "object") return [];
+        const group = entry as Record<string, unknown>;
+        if (typeof group.emoji !== "string" || !Array.isArray(group.from)) return [];
+        const from = group.from
+          .map((address) => typeof address === "string" ? normalizeFmsgAddress(address) : undefined)
+          .filter((address): address is string => Boolean(address));
+        return from.length > 0 ? [{ emoji: group.emoji, from }] : [];
+      })
+    : [];
   return {
     ...(raw as unknown as FmsgMessage),
     id: normalizeFmsgMessageId(raw.id),
@@ -35,6 +47,9 @@ export function normalizeFmsgMessage(value: unknown): FmsgMessage {
       : {}),
     from: raw.from,
     to: raw.to as string[],
+    terminal: raw.terminal === true,
+    reaction: typeof raw.reaction === "string" ? raw.reaction : null,
+    reactions,
   };
 }
 
@@ -168,6 +183,27 @@ export class FmsgClient {
   async getMessage(id: string, signal?: AbortSignal): Promise<FmsgMessage> {
     const response = await this.request(`/fmsg/${encodeURIComponent(id)}`, { signal });
     return normalizeFmsgMessage(parseFmsgJson(await response.text()));
+  }
+
+  async reactToMessage(
+    id: string,
+    emoji: string | null,
+    signal?: AbortSignal,
+  ): Promise<FmsgReactResult> {
+    const messageId = normalizeFmsgMessageId(id);
+    const response = await this.request(`/fmsg/${encodeURIComponent(messageId)}/react`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ emoji }),
+      signal,
+    });
+    const result = parseFmsgJson<{ id?: unknown; time?: string | number | null }>(await response.text());
+    return {
+      id: result.id === undefined || result.id === null
+        ? null
+        : normalizeFmsgMessageId(result.id),
+      time: result.time ?? null,
+    };
   }
 
   async getMessageData(id: string, signal?: AbortSignal): Promise<string> {

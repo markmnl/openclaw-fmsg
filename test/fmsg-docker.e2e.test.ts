@@ -42,6 +42,30 @@ async function nextNewMessage(
   });
 }
 
+async function nextReactionUpdate(
+  socket: WebSocket,
+  messageId: string,
+  timeoutMs = 30_000,
+): Promise<FmsgMessage> {
+  return await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("timed out waiting for fmsg reaction event")), timeoutMs);
+    socket.on("message", function onMessage(raw) {
+      try {
+        const event = FmsgClient.parseWsEvent(raw);
+        if (event?.type !== "reaction") return;
+        const message = normalizeFmsgMessage(event.data);
+        if (message.id !== messageId) return;
+        clearTimeout(timer);
+        socket.off("message", onMessage);
+        resolve(message);
+      } catch (error) {
+        clearTimeout(timer);
+        reject(error);
+      }
+    });
+  });
+}
+
 async function waitForInboxMessage(
   client: FmsgClient,
   predicate: (message: FmsgMessage) => boolean,
@@ -59,7 +83,7 @@ async function waitForInboxMessage(
 
 describe.skipIf(!enabled)("fmsg-docker e2e", () => {
   it(
-    "exchanges JWTs, pushes a root and attachment, and carries pid on reply",
+    "exchanges JWTs, carries threads and attachments, and synchronizes reactions",
     async () => {
       const agent = new FmsgClient(
         required("FMSG_E2E_AGENT_API_URL"),
@@ -73,7 +97,9 @@ describe.skipIf(!enabled)("fmsg-docker e2e", () => {
       );
       const [agentToken, peerToken] = await Promise.all([agent.getToken(), peer.getToken()]);
       const peerSubscription = await peer.openWebSocket();
+      const agentSubscription = await agent.openWebSocket();
       await waitForOpen(peerSubscription.socket);
+      await waitForOpen(agentSubscription.socket);
       try {
         const nonce = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
         const topic = `openclaw-fmsg-e2e-${nonce}`;
@@ -101,6 +127,22 @@ describe.skipIf(!enabled)("fmsg-docker e2e", () => {
         const downloaded = await peer.downloadAttachment(received.id, attachment!.filename, 1_000_000);
         expect(Buffer.from(downloaded.data).toString()).toBe(`attachment-${nonce}`);
 
+        const reactionAdded = nextReactionUpdate(agentSubscription.socket, root.id);
+        await peer.reactToMessage(root.id, "👍");
+        expect((await reactionAdded).reactions).toContainEqual({
+          emoji: "👍",
+          from: [peerToken.sender],
+        });
+        const reactionChanged = nextReactionUpdate(agentSubscription.socket, root.id);
+        await peer.reactToMessage(root.id, "❤️");
+        expect((await reactionChanged).reactions).toContainEqual({
+          emoji: "❤️",
+          from: [peerToken.sender],
+        });
+        const reactionCleared = nextReactionUpdate(agentSubscription.socket, root.id);
+        await peer.reactToMessage(root.id, null);
+        expect((await reactionCleared).reactions).toEqual([]);
+
         await peer.sendMessage({
           to: [agentToken.sender],
           pid: received.id,
@@ -115,6 +157,7 @@ describe.skipIf(!enabled)("fmsg-docker e2e", () => {
         expect(await agent.getMessageText(receivedReply)).toBe(`reply-${nonce}`);
       } finally {
         peerSubscription.socket.close();
+        agentSubscription.socket.close();
       }
     },
     60_000,

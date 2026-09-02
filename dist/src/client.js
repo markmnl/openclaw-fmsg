@@ -12,6 +12,19 @@ export function normalizeFmsgMessage(value) {
     if (!Array.isArray(raw.to) || !raw.to.every((entry) => typeof entry === "string")) {
         throw new Error("fmsg returned a message without recipients");
     }
+    const reactions = Array.isArray(raw.reactions)
+        ? raw.reactions.flatMap((entry) => {
+            if (!entry || typeof entry !== "object")
+                return [];
+            const group = entry;
+            if (typeof group.emoji !== "string" || !Array.isArray(group.from))
+                return [];
+            const from = group.from
+                .map((address) => typeof address === "string" ? normalizeFmsgAddress(address) : undefined)
+                .filter((address) => Boolean(address));
+            return from.length > 0 ? [{ emoji: group.emoji, from }] : [];
+        })
+        : [];
     return {
         ...raw,
         id: normalizeFmsgMessageId(raw.id),
@@ -20,6 +33,9 @@ export function normalizeFmsgMessage(value) {
             : {}),
         from: raw.from,
         to: raw.to,
+        terminal: raw.terminal === true,
+        reaction: typeof raw.reaction === "string" ? raw.reaction : null,
+        reactions,
     };
 }
 export class FmsgHttpError extends Error {
@@ -148,6 +164,22 @@ export class FmsgClient {
     async getMessage(id, signal) {
         const response = await this.request(`/fmsg/${encodeURIComponent(id)}`, { signal });
         return normalizeFmsgMessage(parseFmsgJson(await response.text()));
+    }
+    async reactToMessage(id, emoji, signal) {
+        const messageId = normalizeFmsgMessageId(id);
+        const response = await this.request(`/fmsg/${encodeURIComponent(messageId)}/react`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ emoji }),
+            signal,
+        });
+        const result = parseFmsgJson(await response.text());
+        return {
+            id: result.id === undefined || result.id === null
+                ? null
+                : normalizeFmsgMessageId(result.id),
+            time: result.time ?? null,
+        };
     }
     async getMessageData(id, signal) {
         const response = await this.request(`/fmsg/${encodeURIComponent(id)}/data`, { signal });

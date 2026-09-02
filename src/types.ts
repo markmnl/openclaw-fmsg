@@ -19,6 +19,7 @@ export type FmsgMessage = {
   has_add_to?: boolean;
   important?: boolean;
   no_reply?: boolean;
+  terminal?: boolean;
   deflate?: boolean;
   from: string;
   to: string[];
@@ -33,6 +34,13 @@ export type FmsgMessage = {
   read?: boolean;
   time_read?: string | number;
   attachments?: FmsgAttachment[];
+  reaction?: string | null;
+  reactions?: FmsgReactionGroup[];
+};
+
+export type FmsgReactionGroup = {
+  emoji: string;
+  from: string[];
 };
 
 export type FmsgToken = {
@@ -61,6 +69,11 @@ export type FmsgSendInput = {
 export type FmsgSendResult = {
   id: string;
   time?: string | number;
+};
+
+export type FmsgReactResult = {
+  id: string | null;
+  time: string | number | null;
 };
 
 export type FmsgWsEvent = {

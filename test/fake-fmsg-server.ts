@@ -58,6 +58,7 @@ export class FakeFmsgServer {
   private readonly messages = new Map<string, Stored>();
   private readonly attachmentData = new Map<string, Buffer>();
   private readonly readBy = new Map<string, Set<string>>();
+  private readonly reactionRecords = new Map<string, { emoji: string; id: string; time: number }>();
   private nextId = 1;
   private startedUrl?: string;
   readonly requests: FakeRequest[] = [];
@@ -120,6 +121,9 @@ export class FakeFmsgServer {
       size: input.size ?? Buffer.byteLength(data),
       short_text: input.short_text ?? data.slice(0, 20),
       sent: true,
+      terminal: input.terminal === true,
+      reaction: input.reaction ?? null,
+      reactions: input.reactions ?? [],
     };
     this.messages.set(id, message);
     return this.publicMessage(message);
@@ -135,6 +139,19 @@ export class FakeFmsgServer {
     for (const recipient of message.to) {
       for (const socket of this.sockets.get(recipient) ?? []) {
         socket.send(JSON.stringify({ type: "new_msg", data: this.publicMessage(this.messages.get(message.id)!) }));
+      }
+    }
+  }
+
+  pushReactionUpdate(message: FmsgMessage): void {
+    const participants = new Set([message.from, ...message.to]);
+    for (const batch of message.add_to ?? []) {
+      if (batch.add_to_from) participants.add(batch.add_to_from);
+      for (const address of batch.to ?? []) participants.add(address);
+    }
+    for (const participant of participants) {
+      for (const socket of this.sockets.get(participant) ?? []) {
+        socket.send(JSON.stringify({ type: "reaction", data: this.publicMessage(this.messages.get(message.id)!) }));
       }
     }
   }
@@ -223,6 +240,9 @@ export class FakeFmsgServer {
         } catch (error) {
           return json(response, 400, { error: (error as Error).message });
         }
+        if (this.messages.get(body.pid)?.terminal) {
+          return json(response, 409, { error: "pid references a terminal message" });
+        }
       }
       if (body.from !== subject) return json(response, 403, { error: "from does not match JWT" });
       const id = String(this.nextId++);
@@ -243,6 +263,63 @@ export class FakeFmsgServer {
     if (method === "GET" && parts.length === 2) {
       this.requests.push({ method, path });
       return json(response, 200, this.publicMessage(message));
+    }
+    if (method === "POST" && parts[2] === "react") {
+      const body = JSON.parse((await requestBody(request)).toString("utf8")) as { emoji?: unknown };
+      this.requests.push({ method, path, body });
+      if (!message.sent || message.terminal) {
+        return json(response, 409, { error: "message is draft or terminal" });
+      }
+      const participants = new Set([message.from, ...message.to]);
+      for (const batch of message.add_to ?? []) {
+        if (batch.add_to_from) participants.add(batch.add_to_from);
+        for (const address of batch.to ?? []) participants.add(address);
+      }
+      if (!participants.has(subject)) return json(response, 403, { error: "not a participant" });
+      if (participants.size < 2) return json(response, 409, { error: "message has no other participant" });
+      if (body.emoji !== null && body.emoji !== undefined && typeof body.emoji !== "string") {
+        return json(response, 400, { error: "invalid emoji" });
+      }
+      const emoji = typeof body.emoji === "string" ? body.emoji : "";
+      if (Buffer.byteLength(emoji, "utf8") > 64 || (emoji && !/[\p{Extended_Pictographic}\p{Regional_Indicator}]/u.test(emoji))) {
+        return json(response, 400, { error: "invalid emoji" });
+      }
+      const key = `${id}\n${subject}`;
+      const existing = this.reactionRecords.get(key);
+      if (existing?.emoji === emoji) return json(response, 200, { id: Number(existing.id), time: existing.time });
+      if (!existing && !emoji) return json(response, 200, { id: null, time: null });
+      const reactionId = String(this.nextId++);
+      const time = Date.now();
+      if (emoji) this.reactionRecords.set(key, { emoji, id: reactionId, time });
+      else this.reactionRecords.delete(key);
+      this.messages.set(reactionId, {
+        id: reactionId,
+        pid: id,
+        has_pid: true,
+        from: subject,
+        to: [...participants].filter((address) => address !== subject),
+        type: "text/plain;charset=UTF-8",
+        data: emoji,
+        short_text: emoji,
+        size: Buffer.byteLength(emoji, "utf8"),
+        sent: true,
+        time,
+        no_reply: true,
+        terminal: true,
+        reaction: emoji,
+        reactions: [],
+      });
+      const grouped = new Map<string, string[]>();
+      for (const [recordKey, record] of this.reactionRecords) {
+        const [subjectId, reactor] = recordKey.split("\n");
+        if (subjectId !== id || !reactor) continue;
+        const from = grouped.get(record.emoji) ?? [];
+        from.push(reactor);
+        grouped.set(record.emoji, from);
+      }
+      message.reactions = [...grouped].map(([groupEmoji, from]) => ({ emoji: groupEmoji, from }));
+      this.pushReactionUpdate(this.publicMessage(message));
+      return json(response, 201, { id: Number(reactionId), time });
     }
     if (method === "GET" && parts[2] === "data") {
       this.requests.push({ method, path });

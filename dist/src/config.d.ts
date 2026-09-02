@@ -6,6 +6,8 @@ export declare const DEFAULT_MAX_AGENT_TURNS_PER_ROOT = 20;
 export declare const DEFAULT_MAX_AGENT_TURNS_PER_SENDER = 20;
 export declare const DEFAULT_AGENT_TURN_WINDOW_MS = 60000;
 export declare const DEFAULT_MEDIA_MAX_BYTES: number;
+export declare const DEFAULT_REACTION_NOTIFICATIONS = "own";
+export type FmsgReactionNotificationMode = "off" | "own" | "all";
 export type FmsgChannelConfig = {
     enabled?: boolean;
     apiUrl?: string;
@@ -18,6 +20,10 @@ export type FmsgChannelConfig = {
     maxAgentTurnsPerSender?: number;
     agentTurnWindowMs?: number;
     mediaMaxBytes?: number;
+    actions?: {
+        reactions?: boolean;
+    };
+    reactionNotifications?: FmsgReactionNotificationMode;
 };
 export type ResolvedFmsgAccount = {
     accountId: string;
@@ -36,6 +42,10 @@ export type ResolvedFmsgConfig = {
     maxAgentTurnsPerSender: number;
     agentTurnWindowMs: number;
     mediaMaxBytes: number;
+    actions: {
+        reactions: boolean;
+    };
+    reactionNotifications: FmsgReactionNotificationMode;
 };
 export declare const secretInputJsonSchema: {
     readonly oneOf: readonly [{
@@ -144,6 +154,26 @@ export declare const fmsgChannelJsonSchema: {
             readonly type: "integer";
             readonly minimum: 1;
             readonly default: number;
+        };
+        readonly actions: {
+            readonly type: "object";
+            readonly additionalProperties: false;
+            readonly properties: {
+                readonly reactions: {
+                    readonly type: "boolean";
+                    readonly default: true;
+                    readonly description: "Allow the shared OpenClaw message tool to add, change, clear, and list fmsg reactions.";
+                };
+            };
+            readonly default: {
+                readonly reactions: true;
+            };
+        };
+        readonly reactionNotifications: {
+            readonly type: "string";
+            readonly enum: readonly ["off", "own", "all"];
+            readonly default: "own";
+            readonly description: "Surface no reactions, reactions to agent-authored messages, or reactions to all known messages.";
         };
     };
 };

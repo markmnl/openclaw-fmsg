@@ -3,6 +3,7 @@ import { createMessageReceiptFromOutboundResults, defineChannelMessageAdapter, }
 import { fmsgChannelConfigSchema, listFmsgAccountIds, normalizeFmsgAddress, resolveEffectiveAllowedUsers, resolveFmsgAccount, } from "./config.js";
 import { fmsgChannelSecrets } from "./secret-contract.js";
 import { fmsgSetupContract, fmsgSetupWizard } from "./setup.js";
+import { fmsgMessageActions } from "./reactions.js";
 async function sendFmsgOutbound(params) {
     const outbound = await import("./outbound.js");
     return outbound.sendFmsgOutbound(params);
@@ -108,6 +109,7 @@ export const fmsgChannelPlugin = createChatChannelPlugin({
             reply: true,
             threads: true,
             media: true,
+            reactions: true,
         },
         reload: { configPrefixes: ["channels.fmsg"] },
         configSchema: fmsgChannelConfigSchema,
@@ -180,6 +182,7 @@ export const fmsgChannelPlugin = createChatChannelPlugin({
             },
         },
         message: messageAdapter,
+        actions: fmsgMessageActions,
         gateway: {
             startAccount: async (ctx) => {
                 const gateway = await import("./gateway.js");

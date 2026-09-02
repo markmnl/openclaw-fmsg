@@ -49,7 +49,7 @@ jobs:
 
       - name: Install OpenClaw peer for validation
         run: |
-          npm install --prefix "$RUNNER_TEMP/openclaw-peer" --no-save --package-lock=false --ignore-scripts openclaw@2026.8.1
+          npm install --prefix "$RUNNER_TEMP/openclaw-peer" --no-save --package-lock=false --ignore-scripts openclaw@2026.8.2
           ln -s "$RUNNER_TEMP/openclaw-peer/node_modules/openclaw" node_modules/openclaw
 
       - name: Typecheck

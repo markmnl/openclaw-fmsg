@@ -4,6 +4,7 @@ import { FmsgClient } from "./client.js";
 import { rawFmsgConfig, resolveEffectiveAllowedUsers, } from "./config.js";
 import { runFmsgConnection } from "./connection-manager.js";
 import { handleFmsgInbound } from "./inbound.js";
+import { handleFmsgReaction } from "./reactions.js";
 import { formatSafeError } from "./redact.js";
 import { fmsgStatePath, registerActiveFmsgAccount } from "./service.js";
 import { FmsgStateStore } from "./state.js";
@@ -101,6 +102,18 @@ export async function startFmsgGatewayAccount(ctx) {
                     });
                     throw error;
                 }
+            },
+            onReaction: async (message, source) => {
+                ctx.setStatus({
+                    accountId: account.accountId,
+                    lastEventAt: Date.now(),
+                });
+                await handleFmsgReaction({
+                    cfg: ctx.cfg,
+                    account: service,
+                    message,
+                    source,
+                });
             },
         });
     }

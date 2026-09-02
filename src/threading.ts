@@ -21,6 +21,7 @@ export type StoredMessage = {
   topic?: string;
   important?: boolean;
   noReply?: boolean;
+  terminal?: boolean;
 };
 
 function pushAddress(target: string[], seen: Set<string>, raw: string | undefined): void {
@@ -98,19 +99,7 @@ export async function buildAncestryContext(params: {
   maxChars?: number;
   signal?: AbortSignal;
 }): Promise<{ messages: FmsgMessage[]; context: string }> {
-  const chain: FmsgMessage[] = [params.leaf];
-  const seen = new Set([params.leaf.id]);
-  let current = params.leaf;
-  while ((current.pid || current.has_pid) && current.pid && !seen.has(current.pid)) {
-    seen.add(current.pid);
-    try {
-      current = await params.client.getMessage(current.pid, params.signal);
-      chain.push(current);
-    } catch {
-      break;
-    }
-  }
-  chain.reverse();
+  const chain = await loadAncestryMessages(params);
 
   const ancestors = chain.slice(0, -1).slice(-(params.maxMessages ?? 20));
   if (ancestors.length === 0) return { messages: chain, context: "" };
@@ -137,4 +126,25 @@ export async function buildAncestryContext(params: {
     used += line.length + 1;
   }
   return { messages: chain, context: lines.join("\n") };
+}
+
+export async function loadAncestryMessages(params: {
+  leaf: FmsgMessage;
+  client: FmsgClient;
+  signal?: AbortSignal;
+}): Promise<FmsgMessage[]> {
+  const chain: FmsgMessage[] = [params.leaf];
+  const seen = new Set([params.leaf.id]);
+  let current = params.leaf;
+  while ((current.pid || current.has_pid) && current.pid && !seen.has(current.pid)) {
+    seen.add(current.pid);
+    try {
+      current = await params.client.getMessage(current.pid, params.signal);
+      chain.push(current);
+    } catch {
+      break;
+    }
+  }
+  chain.reverse();
+  return chain;
 }

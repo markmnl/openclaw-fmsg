@@ -1,5 +1,5 @@
 import WebSocket from "ws";
-import type { FmsgMessage, FmsgSendInput, FmsgSendResult, FmsgToken, FmsgWsEvent, LogSink } from "./types.js";
+import type { FmsgMessage, FmsgReactResult, FmsgSendInput, FmsgSendResult, FmsgToken, FmsgWsEvent, LogSink } from "./types.js";
 type FetchLike = typeof fetch;
 export declare function normalizeFmsgMessage(value: unknown): FmsgMessage;
 export declare class FmsgHttpError extends Error {
@@ -24,6 +24,7 @@ export declare class FmsgClient {
     listInbox(limit?: number, offset?: number, signal?: AbortSignal): Promise<FmsgMessage[]>;
     listSent(limit?: number, offset?: number, signal?: AbortSignal): Promise<FmsgMessage[]>;
     getMessage(id: string, signal?: AbortSignal): Promise<FmsgMessage>;
+    reactToMessage(id: string, emoji: string | null, signal?: AbortSignal): Promise<FmsgReactResult>;
     getMessageData(id: string, signal?: AbortSignal): Promise<string>;
     getMessageText(message: FmsgMessage, signal?: AbortSignal): Promise<string>;
     markRead(id: string, signal?: AbortSignal): Promise<void>;

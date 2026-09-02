@@ -4,6 +4,18 @@ import { compareFmsgMessageIds } from "./message-id.js";
 import type { FmsgMessage } from "./types.js";
 import { participantsFromMessage, type StoredMessage, type ThreadAssignment } from "./threading.js";
 
+export type FmsgReactionChange = {
+  from: string;
+  previous?: string;
+  emoji?: string;
+};
+
+type ReactionSnapshot = {
+  bySender: Record<string, string>;
+  generation: number;
+  updatedAt: number;
+};
+
 type PersistedState = {
   version: 1;
   messages: Record<string, StoredMessage>;
@@ -16,6 +28,7 @@ type PersistedState = {
   turnTimestampsByRoot: Record<string, number[]>;
   turnTimestampsBySender: Record<string, number[]>;
   lastDirectByAddress: Record<string, string>;
+  reactionSnapshots: Record<string, ReactionSnapshot>;
   highWaterId?: string;
 };
 
@@ -31,6 +44,7 @@ const EMPTY_STATE: PersistedState = {
   turnTimestampsByRoot: {},
   turnTimestampsBySender: {},
   lastDirectByAddress: {},
+  reactionSnapshots: {},
 };
 
 function cloneEmptyState(): PersistedState {
@@ -62,6 +76,7 @@ export class FmsgStateStore {
           turnTimestampsByRoot: parsed.turnTimestampsByRoot ?? {},
           turnTimestampsBySender: parsed.turnTimestampsBySender ?? {},
           lastDirectByAddress: parsed.lastDirectByAddress ?? {},
+          reactionSnapshots: parsed.reactionSnapshots ?? {},
         };
       }
     } catch (error) {
@@ -108,6 +123,57 @@ export class FmsgStateStore {
     return this.state.messages[id];
   }
 
+  hasReactionSnapshot(messageId: string): boolean {
+    return this.state.reactionSnapshots[messageId] !== undefined;
+  }
+
+  getReactionSnapshot(messageId: string): Readonly<Record<string, string>> | undefined {
+    const snapshot = this.state.reactionSnapshots[messageId];
+    return snapshot ? { ...snapshot.bySender } : undefined;
+  }
+
+  async recordReactionSnapshot(
+    message: FmsgMessage,
+    options: { seedIfMissing?: boolean; now?: number } = {},
+  ): Promise<{ initialized: boolean; generation: number; changes: FmsgReactionChange[] }> {
+    const current: Record<string, string> = {};
+    for (const group of message.reactions ?? []) {
+      if (!group.emoji) continue;
+      for (const raw of group.from) {
+        const sender = raw.toLowerCase();
+        current[sender] = group.emoji;
+      }
+    }
+    const previous = this.state.reactionSnapshots[message.id];
+    const changes: FmsgReactionChange[] = [];
+    if (previous || !options.seedIfMissing) {
+      for (const sender of new Set([
+        ...Object.keys(previous?.bySender ?? {}),
+        ...Object.keys(current),
+      ])) {
+        const before = previous?.bySender[sender];
+        const after = current[sender];
+        if (before === after) continue;
+        changes.push({
+          from: sender,
+          ...(before !== undefined ? { previous: before } : {}),
+          ...(after !== undefined ? { emoji: after } : {}),
+        });
+      }
+    }
+    const generation = previous
+      ? previous.generation + (changes.length > 0 ? 1 : 0)
+      : 1;
+    this.state.reactionSnapshots[message.id] = {
+      bySender: current,
+      generation,
+      updatedAt: options.now ?? Date.now(),
+    };
+    this.pruneReactionSnapshots();
+    await this.persist();
+    return { initialized: previous !== undefined, generation, changes };
+  }
+
   getLastInbound(branchId: string): string | undefined {
     return this.state.lastInboundByBranch[branchId];
   }
@@ -128,6 +194,17 @@ export class FmsgStateStore {
   assignMessage(message: FmsgMessage, options: { inbound?: boolean; branchId?: string; rootId?: string } = {}): ThreadAssignment {
     const existing = this.state.messages[message.id];
     if (existing) {
+      existing.from = message.from.toLowerCase();
+      existing.to = message.to.map((address) => address.toLowerCase());
+      const participants = participantsFromMessage(message);
+      existing.addTo = participants.filter(
+        (address) => address !== existing.from && !existing.to.includes(address),
+      );
+      if (message.time !== undefined) existing.time = message.time;
+      if (message.topic !== undefined) existing.topic = message.topic;
+      existing.important = message.important === true || undefined;
+      existing.noReply = message.no_reply === true || undefined;
+      existing.terminal = message.terminal === true || undefined;
       if (options.inbound) {
         if (!this.state.pendingInbound.includes(message.id)) this.state.pendingInbound.push(message.id);
         this.state.lastInboundByBranch[existing.branchId] = message.id;
@@ -179,6 +256,7 @@ export class FmsgStateStore {
       ...(message.topic ? { topic: message.topic } : {}),
       ...(message.important ? { important: true } : {}),
       ...(message.no_reply ? { noReply: true } : {}),
+      ...(message.terminal ? { terminal: true } : {}),
     };
     if (options.inbound) {
       if (!this.state.pendingInbound.includes(message.id)) this.state.pendingInbound.push(message.id);
@@ -307,10 +385,20 @@ export class FmsgStateStore {
     entries.sort((left, right) => compareMessageIds(left.id, right.id));
     const remove = new Set(entries.slice(0, entries.length - 1000).map((entry) => entry.id));
     for (const id of remove) delete this.state.messages[id];
+    for (const id of remove) delete this.state.reactionSnapshots[id];
     for (const [parent, children] of Object.entries(this.state.children)) {
       const kept = children.filter((id) => !remove.has(id));
       if (kept.length === 0 && remove.has(parent)) delete this.state.children[parent];
       else this.state.children[parent] = kept;
+    }
+  }
+
+  private pruneReactionSnapshots(): void {
+    const entries = Object.entries(this.state.reactionSnapshots);
+    if (entries.length <= 2000) return;
+    entries.sort((left, right) => left[1].updatedAt - right[1].updatedAt);
+    for (const [messageId] of entries.slice(0, entries.length - 2000)) {
+      delete this.state.reactionSnapshots[messageId];
     }
   }
 }

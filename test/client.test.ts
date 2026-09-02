@@ -114,4 +114,40 @@ describe("FmsgClient", () => {
     });
     await expect(client.downloadAttachment("7", "note.txt", 2)).rejects.toThrow("exceeds");
   });
+
+  it("adds, changes, lists, and clears reactions", async () => {
+    server.seedMessage({
+      id: 30,
+      from: "@alice@example.net",
+      to: ["@agent@example.com"],
+      data: "react here",
+    });
+    const client = new FmsgClient(server.url, "fmsgk_agent-test", { refreshMarginMs: 0 });
+    const added = await client.reactToMessage("30", "👍");
+    expect(added.id).toBeTruthy();
+    await expect(client.getMessage("30")).resolves.toMatchObject({
+      terminal: false,
+      reaction: null,
+      reactions: [{ emoji: "👍", from: ["@agent@example.com"] }],
+    });
+    await expect(client.reactToMessage("30", "👍")).resolves.toEqual(added);
+    await client.reactToMessage("30", "❤️");
+    await expect(client.getMessage("30")).resolves.toMatchObject({
+      reactions: [{ emoji: "❤️", from: ["@agent@example.com"] }],
+    });
+    await client.reactToMessage("30", null);
+    await expect(client.getMessage("30")).resolves.toMatchObject({ reactions: [] });
+  });
+
+  it("surfaces terminal reaction rejection", async () => {
+    server.seedMessage({
+      id: 31,
+      from: "@alice@example.net",
+      to: ["@agent@example.com"],
+      data: "closed",
+      terminal: true,
+    });
+    const client = new FmsgClient(server.url, "fmsgk_agent-test", { refreshMarginMs: 0 });
+    await expect(client.reactToMessage("31", "👍")).rejects.toMatchObject({ status: 409 });
+  });
 });

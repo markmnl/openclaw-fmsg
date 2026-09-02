@@ -14,12 +14,13 @@ concurrency:
 
 jobs:
   test:
-    name: Node.js ${{ matrix.node-version }}
+    name: Node.js ${{ matrix.node-version }} / OpenClaw ${{ matrix.openclaw-version }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         node-version: ["22.22.3", "24.15.0", "25.9.0"]
+        openclaw-version: ["2026.8.1", "2026.8.2"]
 
     steps:
       - name: Check out repository
@@ -36,7 +37,7 @@ jobs:
 
       - name: Install OpenClaw peer for validation
         run: |
-          npm install --prefix "$RUNNER_TEMP/openclaw-peer" --no-save --package-lock=false --ignore-scripts openclaw@2026.8.1
+          npm install --prefix "$RUNNER_TEMP/openclaw-peer" --no-save --package-lock=false --ignore-scripts openclaw@${{ matrix.openclaw-version }}
           ln -s "$RUNNER_TEMP/openclaw-peer/node_modules/openclaw" node_modules/openclaw
 
       - name: Typecheck
@@ -76,7 +77,7 @@ jobs:
 
       - name: Install OpenClaw peer for validation
         run: |
-          npm install --prefix "$RUNNER_TEMP/openclaw-peer" --no-save --package-lock=false --ignore-scripts openclaw@2026.8.1
+          npm install --prefix "$RUNNER_TEMP/openclaw-peer" --no-save --package-lock=false --ignore-scripts openclaw@2026.8.2
           ln -s "$RUNNER_TEMP/openclaw-peer/node_modules/openclaw" node_modules/openclaw
 
       - name: Run real fmsg acceptance

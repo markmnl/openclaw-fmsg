@@ -121,6 +121,9 @@ export async function sendFmsgOutbound(params: SendFmsgOutboundParams): Promise<
   const token = await service.client.getToken();
   const parent = await resolveParent(service, params, counterparty);
   const participantSource = parent.parent ?? parent.stored;
+  if (participantSource?.terminal) {
+    throw new Error(`fmsg message ${participantSource.id} is terminal and cannot be replied to`);
+  }
   const recipients = participantSource
     ? replyAllRecipients(participantSource, token.sender)
     : [counterparty];

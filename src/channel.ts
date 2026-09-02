@@ -20,6 +20,7 @@ import {
 } from "./config.js";
 import { fmsgChannelSecrets } from "./secret-contract.js";
 import { fmsgSetupContract, fmsgSetupWizard } from "./setup.js";
+import { fmsgMessageActions } from "./reactions.js";
 
 async function sendFmsgOutbound(
   params: Parameters<(typeof import("./outbound.js"))["sendFmsgOutbound"]>[0],
@@ -145,6 +146,7 @@ export const fmsgChannelPlugin: ChannelPlugin<ResolvedFmsgAccount> = createChatC
       reply: true,
       threads: true,
       media: true,
+      reactions: true,
     },
     reload: { configPrefixes: ["channels.fmsg"] },
     configSchema: fmsgChannelConfigSchema,
@@ -227,6 +229,7 @@ export const fmsgChannelPlugin: ChannelPlugin<ResolvedFmsgAccount> = createChatC
       },
     },
     message: messageAdapter,
+    actions: fmsgMessageActions,
     gateway: {
       startAccount: async (ctx) => {
         const gateway = await import("./gateway.js");

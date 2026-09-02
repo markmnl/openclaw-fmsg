@@ -33,6 +33,8 @@ describe("fmsg outbound semantics", () => {
         maxAgentTurnsPerSender: 20,
         agentTurnWindowMs: 60_000,
         mediaMaxBytes: 10_000_000,
+        actions: { reactions: true },
+        reactionNotifications: "own",
       },
       client: new FmsgClient(server.url, "fmsgk_agent-test", { refreshMarginMs: 0 }),
       state,
@@ -156,6 +158,26 @@ describe("fmsg outbound semantics", () => {
     expect(sent.pid).toBeUndefined();
     const draft = server.requests.find((request) => request.method === "POST" && request.path === "/fmsg")?.body as { topic: string };
     expect(draft.topic).toBe("Fresh topic");
+  });
+
+  it("rejects replies to terminal messages before drafting", async () => {
+    const parent = server.seedMessage({
+      id: 35,
+      from: "@alice@example.net",
+      to: ["@agent@example.com"],
+      terminal: true,
+      data: "closed",
+    });
+    state.assignMessage(parent, { inbound: true });
+    await expect(sendFmsgOutbound({
+      cfg: {} as never,
+      to: "@alice@example.net",
+      text: "too late",
+      replyToId: "35",
+      threadId: "35",
+    })).rejects.toThrow("terminal");
+    expect(server.requests.some((request) => request.method === "POST" && request.path === "/fmsg"))
+      .toBe(false);
   });
 
   it("reports the authenticated channel identity through directory.self", async () => {

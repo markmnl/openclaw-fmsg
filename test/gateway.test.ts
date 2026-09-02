@@ -25,6 +25,8 @@ describe("fmsg gateway status", () => {
             maxAgentTurnsPerSender: 20,
             agentTurnWindowMs: 60_000,
             mediaMaxBytes: 10_000_000,
+            actions: { reactions: true },
+            reactionNotifications: "own",
           },
         },
         cfg: {

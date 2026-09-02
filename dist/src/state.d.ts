@@ -1,5 +1,10 @@
 import type { FmsgMessage } from "./types.js";
 import { type StoredMessage, type ThreadAssignment } from "./threading.js";
+export type FmsgReactionChange = {
+    from: string;
+    previous?: string;
+    emoji?: string;
+};
 export declare class FmsgStateStore {
     private readonly filePath;
     private state;
@@ -14,6 +19,16 @@ export declare class FmsgStateStore {
     get highWaterId(): string | undefined;
     get pendingInboundIds(): string[];
     getMessage(id: string): StoredMessage | undefined;
+    hasReactionSnapshot(messageId: string): boolean;
+    getReactionSnapshot(messageId: string): Readonly<Record<string, string>> | undefined;
+    recordReactionSnapshot(message: FmsgMessage, options?: {
+        seedIfMissing?: boolean;
+        now?: number;
+    }): Promise<{
+        initialized: boolean;
+        generation: number;
+        changes: FmsgReactionChange[];
+    }>;
     getLastInbound(branchId: string): string | undefined;
     getLastOutbound(branchId: string): string | undefined;
     getLastDirect(address: string): string | undefined;
@@ -58,5 +73,6 @@ export declare class FmsgStateStore {
         now?: number;
     }): Promise<void>;
     private pruneMessages;
+    private pruneReactionSnapshots;
 }
 export declare function compareMessageIds(left: string, right: string): number;

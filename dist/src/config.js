@@ -5,6 +5,7 @@ export const DEFAULT_MAX_AGENT_TURNS_PER_ROOT = 20;
 export const DEFAULT_MAX_AGENT_TURNS_PER_SENDER = 20;
 export const DEFAULT_AGENT_TURN_WINDOW_MS = 60_000;
 export const DEFAULT_MEDIA_MAX_BYTES = 10 * 1024 * 1024;
+export const DEFAULT_REACTION_NOTIFICATIONS = "own";
 export const secretInputJsonSchema = {
     oneOf: [
         { type: "string", minLength: 1 },
@@ -70,6 +71,24 @@ export const fmsgChannelJsonSchema = {
             type: "integer",
             minimum: 1,
             default: DEFAULT_MEDIA_MAX_BYTES,
+        },
+        actions: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+                reactions: {
+                    type: "boolean",
+                    default: true,
+                    description: "Allow the shared OpenClaw message tool to add, change, clear, and list fmsg reactions.",
+                },
+            },
+            default: { reactions: true },
+        },
+        reactionNotifications: {
+            type: "string",
+            enum: ["off", "own", "all"],
+            default: DEFAULT_REACTION_NOTIFICATIONS,
+            description: "Surface no reactions, reactions to agent-authored messages, or reactions to all known messages.",
         },
     },
 };
@@ -177,6 +196,10 @@ export function resolveFmsgConfig(cfg, env = process.env) {
             raw.agentTurnWindowMs ??
             DEFAULT_AGENT_TURN_WINDOW_MS,
         mediaMaxBytes: raw.mediaMaxBytes ?? DEFAULT_MEDIA_MAX_BYTES,
+        actions: {
+            reactions: raw.actions?.reactions ?? true,
+        },
+        reactionNotifications: raw.reactionNotifications ?? DEFAULT_REACTION_NOTIFICATIONS,
     };
 }
 export function resolveEffectiveAllowedUsers(config) {

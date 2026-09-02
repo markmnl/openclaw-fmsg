@@ -1,7 +1,7 @@
 # OpenClaw-fmsg
 
 [![Tests](https://github.com/markmnl/openclaw-fmsg/actions/workflows/tests.yml/badge.svg)](https://github.com/markmnl/openclaw-fmsg/actions/workflows/tests.yml)
-[![OpenClaw](https://img.shields.io/badge/OpenClaw-%E2%89%A52026.8.1-e11d48)](https://openclaw.ai)
+[![OpenClaw](https://img.shields.io/badge/OpenClaw-2026.8.2-e11d48)](https://openclaw.ai)
 [![Node.js](https://img.shields.io/badge/Node.js-22%20%7C%2024%20%7C%2025-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 
@@ -19,13 +19,15 @@ Connect [OpenClaw](https://openclaw.ai) to [fmsg](https://fmsg.org), the federat
 - Reliable delivery: WebSocket push, inbox catch-up, deduplication, JWT refresh, and reconnect backoff.
 - Safe by default: deny-by-default inbound access, `no_reply` enforcement, loop protection, and outbound credential redaction.
 - Full conversations: reply-all participant handling, attachment transfer, and chained replies within an agent turn.
+- Native reactions: add, change, clear, and list reactions through OpenClaw's shared `message` tool, with reconnect synchronization.
 - Proactive messaging: the bundled `fmsg_send` tool can continue a one-to-one thread or start a new root.
 
 ## Compatibility
 
 | Component | Supported |
 |---|---|
-| OpenClaw | `2026.8.1` or newer |
+| OpenClaw | `2026.8.1` or newer; CI-verified through `2026.8.2` |
+| fmsg Web API | FMSG-003 `v0.2.0` or newer for reactions |
 | Node.js 22 | `22.22.3` or newer |
 | Node.js 24 | `24.15.0` or newer |
 | Node.js 25 | `25.9.0` or newer |
@@ -69,7 +71,9 @@ Alternatively, configure the channel explicitly:
       "maxAgentTurnsPerThread": 8,
       "maxAgentTurnsPerRoot": 20,
       "maxAgentTurnsPerSender": 20,
-      "agentTurnWindowMs": 60000
+      "agentTurnWindowMs": 60000,
+      "actions": { "reactions": true },
+      "reactionNotifications": "own"
     }
   }
 }
@@ -123,6 +127,8 @@ Environment values take precedence over `channels.fmsg`. `apiUrl` is required: t
 | `maxAgentTurnsPerSender` | `FMSG_MAX_AGENT_TURNS_PER_SENDER` | `20` | Automatic OpenClaw turns from one normalized sender across all roots/window; `0` disables |
 | `agentTurnWindowMs` | `FMSG_AGENT_TURN_WINDOW_MS` | `60000` | Sliding window shared by all three circuit breakers |
 | `mediaMaxBytes` | — | `10485760` | Maximum bytes per inbound/outbound attachment |
+| `actions.reactions` | — | `true` | Expose `react` and `reactions` on OpenClaw's shared `message` tool |
+| `reactionNotifications` | — | `own` | `off`, `own`, or `all`; controls which inbound reaction changes become system events |
 
 Access is default-deny:
 
@@ -221,9 +227,27 @@ The plugin registers `fmsg_send`:
 
 By default it continues the latest strict one-to-one thread. Set `fmsg_new_thread` to force a new root.
 
+## Reactions
+
+Reactions require an fmsg Web API implementing [FMSG-003 v0.2.0](https://github.com/markmnl/fmsg/blob/main/standards/fmsg-003-webapi.md) and [FMSG-005](https://github.com/markmnl/fmsg/blob/main/standards/fmsg-005-reactions.md). They use OpenClaw's shared `message` tool rather than a plugin-specific tool:
+
+```json
+{ "action": "react", "messageId": "3528", "emoji": "👍" }
+{ "action": "react", "messageId": "3528", "emoji": "👍", "remove": true }
+{ "action": "react", "messageId": "3528", "emoji": "" }
+{ "action": "reactions", "messageId": "3528" }
+```
+
+Each fmsg participant has one effective reaction per message. Adding another emoji changes it; an empty emoji clears it. A specific removal only clears the reaction when the agent currently has that emoji, so OpenClaw's removal semantics remain idempotent.
+
+Inbound reaction events update persisted state and become low-priority system events in the subject's existing root or branch session. They do not create sessions, mark messages read, consume automatic-turn budgets, or trigger an immediate agent reply. `reactionNotifications: "own"` reports reactions to agent-authored messages; `all` also reports reactions to other known messages; `off` synchronizes state silently. The sender access policy is still enforced.
+
+Because reaction WebSocket events are not durable, reconnect catch-up synchronizes effective reactions from both the inbox and sent-message lists. The first run after upgrading seeds existing reactions silently instead of replaying historical notifications.
+
 ## Safety behavior
 
 - `no_reply` inbound messages are marked read without ancestry fetching or an automatic agent turn.
+- Terminal messages are treated as leaves: the plugin refuses replies and reactions before attempting a draft.
 - `important` is exposed as `FmsgImportant` in OpenClaw's inbound context. `no_reply` is hard-suppressed before model dispatch.
 - The loop circuit breakers count one successful automatic OpenClaw turn, not individual chunks, against the branch, root, and normalized sender. Inbound messages do not reset them. On the final allowed turn for any enabled budget, outbound messages carry `no_reply`; further turns are suppressed until timestamps leave the shared sliding window.
 - Operators can tune each budget independently. Setting `maxAgentTurnsPerThread`, `maxAgentTurnsPerRoot`, or `maxAgentTurnsPerSender` to `0` disables that scope's breaker.
@@ -254,7 +278,7 @@ Stable releases are published to npm by `.github/workflows/publish.yml` when a G
 
 The npm package must configure a trusted GitHub Actions publisher for repository `markmnl/openclaw-fmsg`, workflow `publish.yml`, with `npm publish` allowed. The workflow uses short-lived OIDC credentials and does not require an npm token secret.
 
-The unit suite runs a strict in-memory HTTP and WebSocket implementation of the fmsg Web API. It enforces numeric `pid` input and covers full-range `int64` preservation, JWT exchange/refresh, drafts and attachments, WebSocket plus inbox catch-up, access control, branch mapping, native session routing, reply-all, output chaining, proactive one-to-one continuation, flags, secret redaction, persistence, delivery failure acknowledgement, and the circuit breaker.
+The unit suite runs a strict in-memory HTTP and WebSocket implementation of the fmsg Web API. It enforces numeric `pid` input and covers full-range `int64` preservation, JWT exchange/refresh, drafts and attachments, WebSocket plus inbox/reaction catch-up, reaction actions and snapshot migration, terminal messages, access control, branch mapping, native session routing, reply-all, output chaining, proactive one-to-one continuation, flags, secret redaction, persistence, delivery failure acknowledgement, and the circuit breaker.
 
 ### Live OpenClaw gateway acceptance
 
@@ -279,7 +303,7 @@ FMSG_E2E_PEER_API_KEY='fmsgk_...' \
 npm run test:e2e
 ```
 
-The addresses are derived from the JWTs. The test sends a root with an attachment, observes WebSocket delivery, downloads the attachment, replies through the second deployment, and verifies the reply's `pid`.
+The addresses are derived from the JWTs. The test sends a root with an attachment, observes WebSocket delivery, downloads the attachment, adds/changes/clears a reaction, replies through the second deployment, and verifies the reply's `pid`.
 
 Pull requests and npm releases also run `.github/scripts/run-fmsg-docker-e2e.sh`, which provisions isolated real stacks at a pinned fmsg-docker revision before running this acceptance.
 

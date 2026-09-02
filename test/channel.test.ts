@@ -31,6 +31,12 @@ describe("OpenClaw channel registration and routing", () => {
     expect(route?.threadId).toBe("100:br:102");
   });
 
+  it("advertises native reaction capability", () => {
+    expect(fmsgChannelPlugin.capabilities.reactions).toBe(true);
+    expect(fmsgChannelPlugin.actions?.supportsAction?.({ action: "react" })).toBe(true);
+    expect(fmsgChannelPlugin.actions?.supportsAction?.({ action: "reactions" })).toBe(true);
+  });
+
   it("exposes the home address as a direct default and effective heartbeat owner candidate", () => {
     const cfg = {
       channels: {

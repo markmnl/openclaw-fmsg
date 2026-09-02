@@ -17,6 +17,7 @@ export type StoredMessage = {
     topic?: string;
     important?: boolean;
     noReply?: boolean;
+    terminal?: boolean;
 };
 export declare function participantsFromMessage(message: FmsgMessage): string[];
 export declare function replyAllRecipients(message: FmsgMessage | StoredMessage, ownAddress: string): string[];
@@ -32,3 +33,8 @@ export declare function buildAncestryContext(params: {
     messages: FmsgMessage[];
     context: string;
 }>;
+export declare function loadAncestryMessages(params: {
+    leaf: FmsgMessage;
+    client: FmsgClient;
+    signal?: AbortSignal;
+}): Promise<FmsgMessage[]>;

@@ -1,4 +1,5 @@
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { chmod, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
@@ -7,6 +8,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
+import { FmsgClient } from "../src/client.js";
 import type { FmsgMessage } from "../src/types.js";
 import { FakeFmsgServer } from "./fake-fmsg-server.js";
 
@@ -275,6 +277,24 @@ describe.skipIf(!enabled)("live OpenClaw gateway", () => {
         "the stored root reply",
       );
 
+      const peerClient = new FmsgClient(fmsg.url, "fmsgk_alice-test", { refreshMarginMs: 0 });
+      const modelRequestsBeforeReaction = model.requests.length;
+      await peerClient.reactToMessage(actualRootReply.id, "👍");
+      await waitFor(() => {
+        try {
+          const snapshot = JSON.parse(
+            readFileSync(path.join(stateDir, "fmsg", "default.json"), "utf8"),
+          ) as { reactionSnapshots?: Record<string, { bySender?: Record<string, string> }> };
+          return snapshot.reactionSnapshots?.[actualRootReply.id]?.bySender?.["@alice@example.net"] === "👍"
+            ? true
+            : undefined;
+        } catch {
+          return undefined;
+        }
+      }, "the persisted inbound reaction");
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      expect(model.requests).toHaveLength(modelRequestsBeforeReaction);
+
       const firstChild = fmsg.seedMessage({
         id: "200",
         pid: actualRootReply.id,
@@ -373,7 +393,7 @@ describe.skipIf(!enabled)("live OpenClaw gateway", () => {
         "the inbox catch-up reply after restart",
       );
       await waitFor(
-        () => restartLogs.includes("[fmsg] inbox catch-up complete (1 message)")
+        () => restartLogs.includes("[fmsg] inbox catch-up complete (1 message, ")
           ? true
           : undefined,
         "the completed inbox catch-up",
