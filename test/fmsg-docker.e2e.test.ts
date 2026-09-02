@@ -127,20 +127,22 @@ describe.skipIf(!enabled)("fmsg-docker e2e", () => {
         const downloaded = await peer.downloadAttachment(received.id, attachment!.filename, 1_000_000);
         expect(Buffer.from(downloaded.data).toString()).toBe(`attachment-${nonce}`);
 
+        // Message IDs are local to each fmsg host: react through the peer API
+        // using the peer's received copy, while observing the origin copy.
         const reactionAdded = nextReactionUpdate(agentSubscription.socket, root.id);
-        await peer.reactToMessage(root.id, "👍");
+        await peer.reactToMessage(received.id, "👍");
         expect((await reactionAdded).reactions).toContainEqual({
           emoji: "👍",
           from: [peerToken.sender],
         });
         const reactionChanged = nextReactionUpdate(agentSubscription.socket, root.id);
-        await peer.reactToMessage(root.id, "❤️");
+        await peer.reactToMessage(received.id, "❤️");
         expect((await reactionChanged).reactions).toContainEqual({
           emoji: "❤️",
           from: [peerToken.sender],
         });
         const reactionCleared = nextReactionUpdate(agentSubscription.socket, root.id);
-        await peer.reactToMessage(root.id, null);
+        await peer.reactToMessage(received.id, null);
         expect((await reactionCleared).reactions).toEqual([]);
 
         await peer.sendMessage({
