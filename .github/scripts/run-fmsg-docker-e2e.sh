@@ -2,7 +2,10 @@
 set -euo pipefail
 
 PLUGIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-FMSG_DOCKER_REF="${FMSG_DOCKER_REF:-f3d6a7e217d33d6131e9bc53bdd2c6ba8413634b}"
+# Keep the fixture pinned to a reproducible stack revision. This revision
+# includes the fmsg v0.6 terminal-message column required by FMSG-005 and the
+# reaction-enabled fmsg Web API.
+FMSG_DOCKER_REF="${FMSG_DOCKER_REF:-e6f06b3a0f8f89a70e9dc0962fb17c62817108c6}"
 FMSG_DOCKER_DIR="$(mktemp -d)"
 
 cleanup_plugin_fmsg_e2e() {
