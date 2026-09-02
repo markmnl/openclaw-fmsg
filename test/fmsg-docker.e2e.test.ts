@@ -152,7 +152,9 @@ describe.skipIf(!enabled)("fmsg-docker e2e", () => {
         });
         const receivedReply = await waitForInboxMessage(
           agent,
-          (message) => message.pid === root.id,
+          // Reaction control messages share the subject's pid and have no
+          // message body; wait for the ordinary reply rather than one of them.
+          (message) => message.pid === root.id && message.reaction == null,
           `reply to ${root.id}`,
         );
         expect(receivedReply.pid).toBe(root.id);
